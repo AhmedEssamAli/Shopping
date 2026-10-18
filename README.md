@@ -27,9 +27,9 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
 2. Install the project:
    ```
    git clone https://github.com/AhmedEssamAli/Shopping.git && cd Shopping
-   python -m venv .venv
-   .venv\Scripts\activate          # macOS: source .venv/bin/activate
-   pip install -e .
+   py -m venv .venv                # Windows (py launcher); macOS: python3 -m venv .venv
+   .venv\Scripts\activate          # PowerShell: .venv\Scripts\Activate.ps1; macOS: source .venv/bin/activate
+   python -m pip install -e .      # inside the venv, `python` works on Windows too
    ```
 3. Copy `.env.example` to `.env`.
 4. Check that it works with the live platforms. No login is needed:
