@@ -42,6 +42,7 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
    - In that window, sign in to noon and Amazon.eg (OTP) and set your New Cairo address. Browse there as usual.
    - Keep it open; minimised is fine. shopper attaches to it (`BROWSER_CDP_URL` in `.env`) and only opens and closes background tabs.
    - Why a separate profile: Chrome 136 and later block this kind of attach on your default profile. This window behaves like everyday Chrome, without the "automated software" mode that triggers bot checks.
+   - Check it with `shopper browser-check`. It reports the Chrome version, the tab count and the attach time.
    - To have shopper launch its own browser instead, empty `BROWSER_CDP_URL` and use `shopper login noon`.
 6. Enter real fees. Copy the delivery fee, service fee and minimum order from one checkout per platform into `config/platforms.toml`, then set `verified = true`. Until you do, fees count as 0 and every result says "fees not verified".
 7. Set up the phone link:
@@ -111,7 +112,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · cli.py · store.py (SQLite price history)
-tests/             79 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             80 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

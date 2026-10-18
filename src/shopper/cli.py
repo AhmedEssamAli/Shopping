@@ -6,6 +6,7 @@
   shopper search "<item>"               compare one item
   shopper basket "<list>" | -f FILE     compare a basket (one item per line)
   shopper health                        check sessions and live adapters
+  shopper browser-check                 check that shopper can attach to Shopping Chrome, and how fast
   shopper watch-check                   re-price all watches now and print alerts
   shopper talabat-shops                 list every talabat grocery shop that delivers to you
   shopper refresh talabat               re-read all talabat shop catalogues now (or one: talabat_<id>)
@@ -152,6 +153,33 @@ async def _cmd_talabat_shops(args) -> None:
     print("\n* = already in config/platforms.toml. Paste lines into [talabat] shops to add more.")
 
 
+async def _cmd_browser_check(args) -> None:
+    import os
+    import time
+
+    from .browser import BrowserSession, cdp_info
+
+    s = load_settings()
+    url = os.environ.get("BROWSER_CDP_URL", "").strip()
+    if not url:
+        sys.exit("BROWSER_CDP_URL is empty in .env: shopper launches its own Chrome instead (see README).")
+    info = await cdp_info(url)
+    if info is None:
+        sys.exit(f"Nothing answers at {url}. Start Shopping Chrome: scripts\\windows\\start-shopping-chrome.cmd")
+    print(f"Found {info['browser']} with {info['tabs']} open tabs at {url}.")
+    t0 = time.monotonic()
+    session = BrowserSession(s)
+    try:
+        page = await session.new_page()
+        print(f"Attached in {time.monotonic() - t0:.1f}s.")
+        await page.goto("https://www.noon.com/egypt-en/", wait_until="domcontentloaded", timeout=45000)
+        print(f"Opened noon in a background tab: {await page.title()!r}")
+        await page.close()
+    finally:
+        await session.close()
+    print("OK: Shopping Chrome is ready.")
+
+
 async def _cmd_serve(args) -> None:
     import uvicorn
 
@@ -218,6 +246,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("watch-check").set_defaults(fn=_cmd_watch_check)
     p = sub.add_parser("refresh"); p.add_argument("platform"); p.set_defaults(fn=_cmd_refresh)
     sub.add_parser("talabat-shops").set_defaults(fn=_cmd_talabat_shops)
+    sub.add_parser("browser-check").set_defaults(fn=_cmd_browser_check)
     sub.add_parser("serve").set_defaults(fn=_cmd_serve)
     args = ap.parse_args(argv)
     if getattr(args, "sync", False):

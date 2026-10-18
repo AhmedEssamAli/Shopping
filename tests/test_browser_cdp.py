@@ -49,3 +49,8 @@ async def test_attach_without_chrome_gives_clear_error(tmp_path, monkeypatch):
     s = BrowserSession(Settings(home=tmp_path, platforms={}))
     with pytest.raises(RuntimeError, match="Shopping Chrome is not running"):
         await s.new_page()
+
+
+async def test_cdp_info_none_when_nothing_listens():
+    from shopper.browser import cdp_info
+    assert await cdp_info(f"http://127.0.0.1:{free_port()}") is None

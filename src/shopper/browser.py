@@ -38,13 +38,20 @@ class BrowserSession:
             return self.context
 
     async def _attach(self) -> None:
+        timeout_ms = int(float(os.environ.get("BROWSER_CDP_TIMEOUT_S", "60")) * 1000)
         try:
-            browser = await self._pw.chromium.connect_over_cdp(self.cdp_url, timeout=10000)
+            browser = await self._pw.chromium.connect_over_cdp(self.cdp_url, timeout=timeout_ms)
         except Exception as e:
             await self._pw.stop()
             self._pw = None
-            raise RuntimeError(f"Shopping Chrome is not running at {self.cdp_url}. Start it with "
-                               "scripts\\windows\\start-shopping-chrome.cmd, then retry.") from e
+            info = await cdp_info(self.cdp_url)
+            if info is None:
+                raise RuntimeError(f"Shopping Chrome is not running at {self.cdp_url}. Start it with "
+                                   "scripts\\windows\\start-shopping-chrome.cmd, then retry.") from e
+            raise RuntimeError(
+                f"Shopping Chrome ({info['browser']}, {info['tabs']} open tabs) is running, but attaching took longer "
+                f"than {timeout_ms // 1000}s. Close extra tabs, run `python -m pip install -U playwright`, "
+                "or raise BROWSER_CDP_TIMEOUT_S in .env. `shopper browser-check` times the attach.") from e
         self.context = browser.contexts[0] if browser.contexts else await browser.new_context()
 
     async def _launch(self) -> None:
@@ -149,3 +156,16 @@ async def capture(settings: Settings, name: str, url: str) -> Path:
     await session.close()
     print(f"Saved {len(index)} JSON responses and page.html to {out}")
     return out
+
+
+async def cdp_info(cdp_url: str) -> dict | None:
+    """Browser version and open-tab count from Chrome's debug endpoint, or None if unreachable."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as http:
+            version = (await http.get(f"{cdp_url.rstrip('/')}/json/version")).json()
+            targets = (await http.get(f"{cdp_url.rstrip('/')}/json/list")).json()
+    except Exception:
+        return None
+    return {"browser": version.get("Browser", "?"), "tabs": sum(t.get("type") == "page" for t in targets)}
