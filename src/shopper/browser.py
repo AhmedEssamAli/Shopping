@@ -162,10 +162,15 @@ async def cdp_info(cdp_url: str) -> dict | None:
     """Browser version and open-tab count from Chrome's debug endpoint, or None if unreachable."""
     import httpx
 
-    try:
-        async with httpx.AsyncClient(timeout=5) as http:
-            version = (await http.get(f"{cdp_url.rstrip('/')}/json/version")).json()
-            targets = (await http.get(f"{cdp_url.rstrip('/')}/json/list")).json()
-    except Exception:
-        return None
-    return {"browser": version.get("Browser", "?"), "tabs": sum(t.get("type") == "page" for t in targets)}
+    base = cdp_url.rstrip("/")
+    # trust_env=False: a system/corporate proxy must never sit between us and 127.0.0.1.
+    async with httpx.AsyncClient(timeout=5, trust_env=False) as http:
+        try:
+            version = (await http.get(f"{base}/json/version")).json()
+        except Exception:
+            return None
+        try:
+            tabs = sum(t.get("type") == "page" for t in (await http.get(f"{base}/json/list")).json())
+        except Exception:
+            tabs = "?"
+    return {"browser": version.get("Browser", "?"), "tabs": tabs}
