@@ -1,7 +1,12 @@
-"""One persistent browser profile on the home PC: you sign in to each platform once,
-the cookies stay in ``~/.shopper/profile`` and every later search reuses them.
+"""The signed-in browser on the home PC: you sign in to each platform once and every
+later search reuses the cookies. No passwords are stored by this tool.
 
-No passwords are stored by this tool. Only one process can open the profile at a time.
+Two modes:
+- BROWSER_CDP_URL set (recommended): shopper attaches to a "Shopping Chrome" you start
+  yourself (scripts/windows/start-shopping-chrome.cmd). It is ordinary Chrome, not an
+  automation-launched one, so sites see a normal browser; shopper only opens and closes
+  background tabs in it and never closes your window.
+- Otherwise: shopper launches its own Chrome on ``~/.shopper/profile``.
 """
 from __future__ import annotations
 
@@ -24,6 +29,7 @@ class BrowserSession:
         self._pw: Playwright | None = None
         self.context: BrowserContext | None = None
         self._lock = asyncio.Lock()
+        self.cdp_url = os.environ.get("BROWSER_CDP_URL", "").strip()
 
     async def start(self) -> BrowserContext:
         async with self._lock:  # concurrent searches must not launch two browsers on one profile
@@ -31,9 +37,21 @@ class BrowserSession:
                 await self._launch()
             return self.context
 
+    async def _attach(self) -> None:
+        try:
+            browser = await self._pw.chromium.connect_over_cdp(self.cdp_url, timeout=10000)
+        except Exception as e:
+            await self._pw.stop()
+            self._pw = None
+            raise RuntimeError(f"Shopping Chrome is not running at {self.cdp_url}. Start it with "
+                               "scripts\\windows\\start-shopping-chrome.cmd, then retry.") from e
+        self.context = browser.contexts[0] if browser.contexts else await browser.new_context()
+
     async def _launch(self) -> None:
-        self.settings.profile_dir.mkdir(parents=True, exist_ok=True)
         self._pw = await async_playwright().start()
+        if self.cdp_url:
+            return await self._attach()
+        self.settings.profile_dir.mkdir(parents=True, exist_ok=True)
         opts = dict(
             user_data_dir=str(self.settings.profile_dir),
             headless=self.headless,
@@ -71,9 +89,9 @@ class BrowserSession:
         return len(await ctx.cookies([url]))
 
     async def close(self) -> None:
-        if self.context:
+        if self.context and not self.cdp_url:  # never close the user's own Chrome window
             await self.context.close()
-            self.context = None
+        self.context = None
         if self._pw:
             await self._pw.stop()
             self._pw = None

@@ -37,10 +37,12 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
    ```
    shopper search "Juhayna skimmed milk 1L" --platforms gourmet,seoudi,spinneys
    ```
-5. Sign in once per browser platform. A window opens; you sign in (OTP) and set your New Cairo address:
-   ```
-   shopper login amazon_eg
-   ```
+5. Open **Shopping Chrome** and sign in once. Only noon and Amazon need it; talabat and the grocers need no login.
+   - Run `scripts\windows\start-shopping-chrome.cmd`. A normal Chrome window opens with its own profile, `%LOCALAPPDATA%\shopper-chrome`.
+   - In that window, sign in to noon and Amazon.eg (OTP) and set your New Cairo address. Browse there as usual.
+   - Keep it open; minimised is fine. shopper attaches to it (`BROWSER_CDP_URL` in `.env`) and only opens and closes background tabs.
+   - Why a separate profile: Chrome 136 and later block this kind of attach on your default profile. This window behaves like everyday Chrome, without the "automated software" mode that triggers bot checks.
+   - To have shopper launch its own browser instead, empty `BROWSER_CDP_URL` and use `shopper login noon`.
 6. Enter real fees. Copy the delivery fee, service fee and minimum order from one checkout per platform into `config/platforms.toml`, then set `verified = true`. Until you do, fees count as 0 and every result says "fees not verified".
 7. Set up the phone link:
    - **Bot.** In Telegram, open @BotFather, send `/newbot`, and pick a name and a username that ends in `bot`. Put the token it returns in `TELEGRAM_BOT_TOKEN`.
@@ -73,7 +75,7 @@ shopper platforms
 
 ## Start automatically on Windows
 
-Run `scripts\windows\install-autostart.cmd` once. It creates a scheduled task that starts `shopper serve` at every logon and logs to `%USERPROFILE%\.shopper\serve.log`. Start it now with `schtasks /Run /TN "shopper"`. Remove it with `schtasks /Delete /TN "shopper" /F`.
+Run `scripts\windows\install-autostart.cmd` once. Also put a shortcut to `scripts\windows\start-shopping-chrome.cmd` in your Startup folder (`shell:startup`) so Shopping Chrome opens at logon. It creates a scheduled task that starts `shopper serve` at every logon and logs to `%USERPROFILE%\.shopper\serve.log`. Start it now with `schtasks /Run /TN "shopper"`. Remove it with `schtasks /Delete /TN "shopper" /F`.
 
 ## talabat shops
 
@@ -109,7 +111,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · cli.py · store.py (SQLite price history)
-tests/             73 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             75 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.
