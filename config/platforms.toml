@@ -81,9 +81,14 @@ status = "pending"
 enabled = false
 
 [instashop]
-label = "Instashop (incl. Mahmoud ElFar)"
-status = "pending"
-enabled = false
+# Read from the shop page in your Shopping Chrome (Instashop encrypts its API; shopper does not break it).
+# Shop slug = the part after /client/ in the shop's URL: instashop.com/en-eg/client/<slug>
+status = "browser"
+enabled = true
+verified = false
+shops = [
+  {slug = "mahmoud-elfar-mivida", label = "Mahmoud ElFar (Instashop)"},
+]
 
 [breadfast]
 label = "Breadfast"

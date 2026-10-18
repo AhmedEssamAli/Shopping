@@ -10,9 +10,9 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
 |---|---|---|
 | Gourmet Egypt, Seoudi Market, Spinneys Egypt | **live**, tested 2026-10-18 | public Magento GraphQL catalogue, no login |
 | **talabat grocery shops**: talabat Mart, Carrefour, Spinneys, Metro, Lulu, Zaher Dairy, The Grove, Zidan (79 shops deliver to Tagammoa 5) | **live**, tested 2026-10-18 | talabat's own data routes, no login; each shop's catalogue is saved daily and searched locally; delivery fee and minimum order come live from talabat |
-| noon | **built from your capture, search not yet verified** | signed-in browser profile; catalogue format and add-to-cart call verified from the capture |
-| Amazon.eg | **built, not verified live** | signed-in browser profile |
-| Instashop (incl. Mahmoud ElFar) | **pending** | Cloudflare captcha from the cloud; needs `shopper capture instashop` from the home PC |
+| noon | **built, search not yet working** | Shopping Chrome. On a failed search, shopper saves the page to `~/.shopper/captures/noon/failed-search-*`; send that folder |
+| Amazon.eg | **live on the home PC** | Shopping Chrome. The title fix for brand-line cards is tested on sample markup |
+| Instashop shops (Mahmoud ElFar by default) | **built, search not verified live** | reads the shop page in Shopping Chrome. The product tiles are verified from your capture. Instashop encrypts its API and requires reCAPTCHA, and shopper does not bypass either |
 | Carrefour direct site | not needed | Carrefour comes through talabat |
 | Breadfast, Rabbit | **pending** | Breadfast's website has only app-store links; Rabbit is app-first |
 
@@ -111,7 +111,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · cli.py · store.py (SQLite price history)
-tests/             75 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             79 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

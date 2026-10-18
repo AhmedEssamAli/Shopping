@@ -16,8 +16,12 @@ BASE = "https://www.amazon.eg"
 
 EXTRACT_JS = """() => [...document.querySelectorAll('div[data-component-type="s-search-result"][data-asin]')]
   .map(el => {
-    const h2 = el.querySelector('h2');
-    const title = h2 ? (h2.getAttribute('aria-label') || h2.innerText || '') : '';
+    // Newer cards have two h2: the brand line, then the full title. Take the longest one,
+    // and prefix the brand when the title does not already start with it.
+    const heads = [...el.querySelectorAll('h2')].map(h => (h.getAttribute('aria-label') || h.innerText || '').trim()).filter(Boolean);
+    let title = heads.reduce((a, b) => b.length > a.length ? b : a, '');
+    const brand = heads.length > 1 ? heads[0] : '';
+    if (brand && brand !== title && !title.toLowerCase().startsWith(brand.toLowerCase())) title = brand + ' ' + title;
     const now = el.querySelector('.a-price:not(.a-text-price) .a-offscreen');
     const was = el.querySelector('.a-price.a-text-price .a-offscreen');
     const sponsored = !!el.querySelector('.puis-sponsored-label-text, .s-sponsored-label-info-icon');

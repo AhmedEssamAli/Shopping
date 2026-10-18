@@ -67,6 +67,11 @@ def load_platforms(path: Path) -> dict[str, PlatformConfig]:
         shared = {k: v for k, v in tal.items() if k != "shops"}
         for shop in tal.get("shops", []):
             data[f"talabat_{shop['branch_id']}"] = {**shared, **shop, "talabat_branch": True}
+    insta = data.pop("instashop", None)
+    if insta:  # one platform per Instashop shop: instashop_<slug>
+        shared = {k: v for k, v in insta.items() if k != "shops"}
+        for shop in insta.get("shops", []):
+            data[f"instashop_{shop['slug'].replace('-', '_')}"] = {**shared, **shop, "instashop_shop": True}
     for name, d in data.items():
         fees = PlatformFees(
             delivery_fee=float(d.get("delivery_fee", 0)),

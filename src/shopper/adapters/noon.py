@@ -12,6 +12,10 @@ the endpoint's path.
 from __future__ import annotations
 
 import asyncio
+import json
+import re
+from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote_plus
 
 from ..browser import BrowserSession
@@ -37,6 +41,29 @@ def relevance(hits: list[dict], query: str) -> float:
     if not want or not hits:
         return 0.0
     return sum(any(has_word(w, tokens(h.get("name") or "")) for w in want) for h in hits) / len(hits)
+
+
+def embedded_hits(html: str) -> list[dict]:
+    """Product objects embedded in the page (server-rendered / Next.js flight data)."""
+    text = html.replace('\\"', '"')
+    out, seen = [], set()
+    for m in re.finditer(r'"offer_code"\s*:\s*"([^"]+)"', text):
+        if m.group(1) in seen:
+            continue
+        start = m.start()
+        for _ in range(12):  # walk out to the enclosing object
+            start = text.rfind("{", 0, start)
+            if start < 0:
+                break
+            try:
+                obj, _end = json.JSONDecoder().raw_decode(text[start:])
+            except ValueError:
+                continue
+            if isinstance(obj, dict) and obj.get("offer_code") == m.group(1) and ("price" in obj or "sale_price" in obj):
+                seen.add(m.group(1))
+                out.append(obj)
+                break
+    return out
 
 
 def _hits(body) -> list[dict] | None:
@@ -76,6 +103,7 @@ class NoonAdapter(Adapter):
                 found.append(hits)
 
         page.on("response", lambda r: pending.append(asyncio.ensure_future(grab(r))))
+        html = ""
         try:
             await page.goto(self.search_url(query), wait_until="domcontentloaded", timeout=45000)
             for _ in range(int(self.wait_s * 2)):
@@ -83,13 +111,26 @@ class NoonAdapter(Adapter):
                     break
                 await page.wait_for_timeout(500)
             await asyncio.gather(*pending, return_exceptions=True)
+            html = await page.content()
         finally:
             await page.close()
+        embedded = embedded_hits(html)
+        if embedded:
+            found.append(embedded)
         best = max(found, key=lambda h: relevance(h, query), default=None)
         if not best or relevance(best, query) == 0:
-            raise RuntimeError("noon: no search results seen on the search page. Run `shopper capture noon`, "
-                               "type an item in noon's search box, and send me the capture.")
+            dump = self._dump(query, html, found)
+            raise RuntimeError(f"noon: no search results found. Saved the page to {dump} — send me that folder.")
         return self.parse(best)[:limit]
+
+    def _dump(self, query: str, html: str, found: list[list[dict]]) -> Path:
+        out = self.session.settings.captures_dir / "noon" / f"failed-search-{datetime.now():%Y%m%d-%H%M%S}"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "page.html").write_text(html, encoding="utf-8")
+        (out / "info.json").write_text(json.dumps({"query": query, "hit_sets": [len(h) for h in found],
+                                                   "names": [[x.get("name") for x in h[:5]] for h in found]},
+                                                  indent=2, ensure_ascii=False), encoding="utf-8")
+        return out
 
     def parse(self, hits: list[dict]) -> list[Offer]:
         out = []

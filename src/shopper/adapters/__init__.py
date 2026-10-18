@@ -4,6 +4,7 @@ from ..browser import BrowserSession
 from ..config import Settings
 from .amazon_eg import AmazonEgAdapter
 from .base import Adapter, NotCalibrated
+from .instashop import InstashopAdapter
 from .magento import gourmet, seoudi, spinneys
 from .noon import NoonAdapter
 from .pending import HOME_URLS, PendingAdapter
@@ -30,10 +31,13 @@ def build_adapters(settings: Settings, session: BrowserSession | None) -> dict[s
     if session is not None:
         out["amazon_eg"] = AmazonEgAdapter(session)
         out["noon"] = NoonAdapter(session)
+        for name, p in settings.platforms.items():
+            if p.options.get("instashop_shop"):
+                out[name] = InstashopAdapter(name, p.label, p.options["slug"], session)
     for name in HOME_URLS:
         label = settings.platforms[name].label if name in settings.platforms else name
         out[name] = PendingAdapter(name, label)
     return out
 
 
-__all__ = ["Adapter", "NotCalibrated", "build_adapters", "AmazonEgAdapter", "NoonAdapter", "TalabatShopAdapter", "list_shops"]
+__all__ = ["Adapter", "NotCalibrated", "build_adapters", "AmazonEgAdapter", "NoonAdapter", "InstashopAdapter", "TalabatShopAdapter", "list_shops"]
