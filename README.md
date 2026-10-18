@@ -42,11 +42,11 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
    ```
 6. Enter real fees. Copy the delivery fee, service fee and minimum order from one checkout per platform into `config/platforms.toml`, then set `verified = true`. Until you do, fees count as 0 and every result says "fees not verified".
 7. Set up the phone link:
-   - Create a bot with @BotFather and put the token in `TELEGRAM_BOT_TOKEN`.
-   - Run `shopper serve` and send `/start` to the bot. It replies with your chat ID. Put that ID in `TELEGRAM_ALLOWED_CHAT_IDS`.
-   - Set `WEB_TOKEN` to a random string.
-   - Install Tailscale on the PC and on the phone. Set `WEB_BASE_URL` to the PC's Tailscale address, for example `http://home-pc.tailxyz.ts.net:8765`.
-   - Restart `shopper serve`.
+   - **Bot.** In Telegram, open @BotFather, send `/newbot`, and pick a name and a username that ends in `bot`. Put the token it returns in `TELEGRAM_BOT_TOKEN`.
+   - **Your chat ID.** Run `shopper serve` and send `/start` to your bot. It replies with your chat ID. Stop the server with Ctrl+C and put the ID in `TELEGRAM_ALLOWED_CHAT_IDS`. Add family members with commas.
+   - **Web token.** Set `WEB_TOKEN` to the output of `python -c "import secrets;print(secrets.token_urlsafe(16))"`.
+   - **Tailscale** (needed only for the "Full table" link). Install it on the PC and on the phone, signed in with the same account. On the PC, run `tailscale serve --bg 8765`, then set `WEB_BASE_URL` to the `https://<pc>.<tailnet>.ts.net` address it prints. Keep `WEB_HOST=127.0.0.1`: Tailscale forwards to it, so nothing is exposed to the internet.
+   - Start `shopper serve` again. Keep the PC awake while you shop.
 
 ## Use
 
