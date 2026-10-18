@@ -1,0 +1,172 @@
+{
+ "pageProps": {
+  "initialState": {
+   "itemsData": {
+    "pageCount": 1,
+    "currentPage": 1,
+    "items": [
+     {
+      "title": "Almarai Treats Chocolate Flavored Milk, 200ml",
+      "slug": "almarai-treats-chocolate-flavored-milk-200ml",
+      "price": 14,
+      "originalPrice": 14,
+      "sku": "900398",
+      "stockAmount": 258
+     },
+     {
+      "title": "Almarai Plain Milk Full Fat Bottle 1L",
+      "slug": "almarai-plain-milk-full-fat-bottle-1l",
+      "price": 55,
+      "originalPrice": 55,
+      "sku": "900392",
+      "stockAmount": 12
+     },
+     {
+      "title": "Almarai Plain Milk Bottle Full Fat 1.5L",
+      "slug": "almarai-plain-milk-bottle-full-fat-15l",
+      "price": 79,
+      "originalPrice": 79,
+      "sku": "905872",
+      "stockAmount": 12
+     },
+     {
+      "title": "Lamar Full Cream Milk, 1L",
+      "slug": "lamar-full-cream-milk-1l",
+      "price": 49.15,
+      "originalPrice": 51.2,
+      "sku": "901709",
+      "stockAmount": 12
+     },
+     {
+      "title": "Dango Chocolate Milk 190 Ml",
+      "slug": "dango-chocolate-milk-190-ml",
+      "price": 12,
+      "originalPrice": 12,
+      "sku": "910021",
+      "stockAmount": 49
+     },
+     {
+      "title": "The Milkman Skimmed Milk, 1L",
+      "slug": "the-milkman-skimmed-milk-1l",
+      "price": 58,
+      "originalPrice": 58,
+      "sku": "929418",
+      "stockAmount": 32
+     },
+     {
+      "title": "Almarai Banana  Milk 200 ml",
+      "slug": "almarai-banana-milk-200-ml",
+      "price": 14,
+      "originalPrice": 14,
+      "sku": "900400",
+      "stockAmount": 115
+     },
+     {
+      "title": "Lamar Half Cream Milk, 1L",
+      "slug": "lamar-half-cream-milk-1l",
+      "price": 54.24,
+      "originalPrice": 56.5,
+      "sku": "901710",
+      "stockAmount": 12
+     },
+     {
+      "title": "Lamar 0% Fat Fresh Milk, 1L",
+      "slug": "lamar-0-fat-fresh-milk-1l",
+      "price": 56.5,
+      "originalPrice": 56.5,
+      "sku": "914901",
+      "stockAmount": 12
+     },
+     {
+      "title": "Almarai Treats Double Chocolate Milk, 200ml",
+      "slug": "almarai-treats-double-chocolate-milk-200ml",
+      "price": 15,
+      "originalPrice": 15,
+      "sku": "939882",
+      "stockAmount": 14
+     },
+     {
+      "title": "Lamar Full Cream Lactose Free Milk, 1L",
+      "slug": "lamar-full-cream-lactose-free-milk-1l",
+      "price": 108,
+      "originalPrice": 108,
+      "sku": "917844",
+      "stockAmount": 43
+     },
+     {
+      "title": "Almarai  Strawberry Milk 200 ml",
+      "slug": "almarai-strawberry-milk-200-ml",
+      "price": 13.45,
+      "originalPrice": 13.45,
+      "sku": "900399",
+      "stockAmount": 1
+     },
+     {
+      "title": "Lamar Skimmed Milk, 200ml",
+      "slug": "lamar-skimmed-milk-200ml",
+      "price": 13,
+      "originalPrice": 13,
+      "sku": "901713",
+      "stockAmount": 43
+     },
+     {
+      "title": "Lamar Lamoo Chocolate Flavored Milk, 200ml",
+      "slug": "lamar-lamoo-chocolate-flavored-milk-200ml",
+      "price": 13.05,
+      "originalPrice": 14.5,
+      "sku": "901714",
+      "stockAmount": 217
+     },
+     {
+      "title": "Lamar Full Cream Milk, 200ml",
+      "slug": "lamar-full-cream-milk-200ml",
+      "price": 13,
+      "originalPrice": 13,
+      "sku": "901712",
+      "stockAmount": 238
+     },
+     {
+      "title": "Lamar Skimmed Milk Lactose Free 1L",
+      "slug": "lamar-skimmed-milk-lactose-free-1l",
+      "price": 100,
+      "originalPrice": 100,
+      "sku": "917845",
+      "stockAmount": 35
+     },
+     {
+      "title": "Lamar Lamoo Cookies & Cream Flavored Milk, 200ml",
+      "slug": "lamar-lamoo-cookies-cream-flavored-milk-200ml",
+      "price": 14.5,
+      "originalPrice": 14.5,
+      "sku": "911136",
+      "stockAmount": 25
+     },
+     {
+      "title": "Lamar Chocolate Flavored Milk, 1L",
+      "slug": "lamar-chocolate-flavored-milk-1l",
+      "price": 57,
+      "originalPrice": 57,
+      "sku": "911135",
+      "stockAmount": 2
+     },
+     {
+      "title": "Almarai Treats Long Life Banana Milk, 6x200ml",
+      "slug": "almarai-treats-long-life-banana-milk-6x200ml",
+      "price": 75.45,
+      "originalPrice": 75.45,
+      "sku": "927922",
+      "stockAmount": 7
+     },
+     {
+      "title": "Almarai Full Fat Extra Foam UHT Barista Milk, 1L",
+      "slug": "almarai-full-fat-extra-foam-uht-barista-milk-1l",
+      "price": 58.95,
+      "originalPrice": 58.95,
+      "sku": "929015",
+      "stockAmount": 25
+     }
+    ]
+   }
+  }
+ }
+}

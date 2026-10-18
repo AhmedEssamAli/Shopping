@@ -8,6 +8,7 @@ Send a message:
   /compare [exact]   -> compare the saved list
   /watch <item> [@ price]  -> alert me when it drops (or reaches the price)
   /watches /unwatch N
+  /push              -> add your last best plan to your carts where supported (noon)
 """
 from __future__ import annotations
 
@@ -52,7 +53,9 @@ def build_bot(core: App) -> Application:
         await update.effective_chat.send_action(ChatAction.TYPING)
         await reply(update, f"Searching {len(requests)} item(s)…")
         try:
-            _, text, _ = await core.run(requests, exact_only=exact)
+            result, text, _ = await core.run(requests, exact_only=exact)
+            core.last_results[update.effective_chat.id] = result
+            text += "\nSend /push to add this plan to your carts."
         except Exception as e:
             log.exception("compare failed")
             text = f"Comparison failed: {type(e).__name__}: {e}"
@@ -135,7 +138,17 @@ def build_bot(core: App) -> Application:
             return
         await reply(update, "Removed." if core.store.delete_watch(update.effective_chat.id, wid) else "No such watch.")
 
+    async def push(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not ok(update):
+            return
+        result = core.last_results.get(update.effective_chat.id)
+        if not result:
+            await reply(update, "Compare something first, then /push.")
+            return
+        await reply(update, "\n".join(await core.push_carts(result)))
+
     bot.add_handler(CommandHandler(["start", "help"], start))
+    bot.add_handler(CommandHandler("push", push))
     bot.add_handler(CommandHandler("watch", watch))
     bot.add_handler(CommandHandler("watches", watches))
     bot.add_handler(CommandHandler("unwatch", unwatch))

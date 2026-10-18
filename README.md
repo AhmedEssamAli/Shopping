@@ -8,11 +8,12 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
 
 | Platform | Status | How |
 |---|---|---|
-| Gourmet Egypt | **live**, tested 2026-10-18 | public Magento GraphQL catalogue, no login |
-| Seoudi Market | **live**, tested 2026-10-18 | public Magento GraphQL catalogue, no login |
-| Spinneys Egypt | **live**, tested 2026-10-18 | public Magento GraphQL catalogue, no login |
-| Amazon.eg | **built, not verified live** | signed-in browser profile; cloud IPs are blocked, so verify on the home PC |
-| talabat, noon, Carrefour, Instashop (incl. Mahmoud ElFar) | **pending** | they block cloud IPs; calibrate from a capture on the home PC (see below) |
+| Gourmet Egypt, Seoudi Market, Spinneys Egypt | **live**, tested 2026-10-18 | public Magento GraphQL catalogue, no login |
+| **talabat grocery shops**: talabat Mart, Carrefour, Spinneys, Metro, Lulu, Zaher Dairy, The Grove, Zidan (79 shops deliver to Tagammoa 5) | **live**, tested 2026-10-18 | talabat's own data routes, no login; each shop's catalogue is saved daily and searched locally; delivery fee and minimum order come live from talabat |
+| noon | **built from your capture, search not yet verified** | signed-in browser profile; catalogue format and add-to-cart call verified from the capture |
+| Amazon.eg | **built, not verified live** | signed-in browser profile |
+| Instashop (incl. Mahmoud ElFar) | **pending** | Cloudflare captcha from the cloud; needs `shopper capture instashop` from the home PC |
+| Carrefour direct site | not needed | Carrefour comes through talabat |
 | Breadfast, Rabbit | **pending** | Breadfast's website has only app-store links; Rabbit is app-first |
 
 ## Why it runs at home, not in the cloud
@@ -56,6 +57,7 @@ Telegram:
 - `/add <lines>`, `/list`, `/remove 3` and `/clear` keep a running list. `/compare` (or `/compare exact`) compares the saved list.
 - `/watch Nescafe classic 200g @ 250` watches an item. The bot re-prices it every `WATCH_INTERVAL_HOURS` (default 6). It alerts you when the cheapest exact match reaches your price, or drops by more than 1% when no target is set. `/watches` lists them and `/unwatch 3` removes one.
 - Each comparison also lists **better-value packs**: the same product in another size that costs at least 5% less per litre, kg or piece. Example: a 6 × 1 L pack against single litres.
+- `/push` adds the last best plan to your carts where the platform allows it (noon today); other platforms get links.
 - Arabic and free text work when `ANTHROPIC_API_KEY` is set. Claude turns `2 لبن جهينة كامل الدسم لتر` into `2 × Juhayna full cream milk 1L`. Without the key, a local parser reads one item per line.
 
 CLI:
@@ -64,12 +66,18 @@ shopper basket -f list.txt --html table.html      # one item per line
 shopper basket "milk 1L x2, rice 5kg" --exact --max-orders 1
 shopper health                                     # live checks + browser session cookies
 shopper watch-check                                # re-price all watches now
+shopper basket -f list.txt --debug                 # show each platform's top candidates and why
+shopper basket -f list.txt --push                  # also add the best plan to your noon cart
 shopper platforms
 ```
 
 ## Start automatically on Windows
 
 Run `scripts\windows\install-autostart.cmd` once. It creates a scheduled task that starts `shopper serve` at every logon and logs to `%USERPROFILE%\.shopper\serve.log`. Start it now with `schtasks /Run /TN "shopper"`. Remove it with `schtasks /Delete /TN "shopper" /F`.
+
+## talabat shops
+
+`shopper talabat-shops` lists every grocery shop talabat delivers from to your area, with its fee and minimum order, and prints a ready line for each. Paste lines into `shops = [...]` under `[talabat]` in `config/platforms.toml` to compare more shops. Each shop's catalogue (1,000 to 9,000 items) downloads in the background when `shopper serve` starts and again once a day, so searches stay instant. `shopper refresh talabat` forces it now.
 
 ## How it decides
 
@@ -91,7 +99,7 @@ A window opens. Search for one item, open a product, and add it to the cart, the
 
 ```
 src/shopper/
-  adapters/        magento.py (Gourmet, Seoudi, Spinneys) · amazon_eg.py · pending.py
+  adapters/        magento.py (Gourmet, Seoudi, Spinneys) · talabat.py (any talabat shop) · noon.py · amazon_eg.py · pending.py
   units.py         size and pack parsing
   matching.py      exact / close match rules
   optimizer.py     landed-cost basket split
@@ -101,7 +109,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · cli.py · store.py (SQLite price history)
-tests/             65 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             73 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

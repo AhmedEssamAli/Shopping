@@ -9,8 +9,6 @@ from ..models import Offer
 from .base import Adapter, NotCalibrated
 
 HOME_URLS = {
-    "talabat": "https://www.talabat.com/egypt",
-    "noon": "https://www.noon.com/egypt-en/",
     "carrefour": "https://www.carrefouregypt.com/",
     "instashop": "https://instashop.com/en-eg",
     "breadfast": "https://www.breadfast.com",  # app-only: site links to app stores

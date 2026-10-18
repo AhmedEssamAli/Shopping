@@ -18,6 +18,7 @@ class App:
         needs_browser = any(p.status == "browser" for p in self.settings.enabled())
         self.browser = BrowserSession(self.settings) if needs_browser else None
         self.adapters = build_adapters(self.settings, self.browser)
+        self.last_results: dict[int, CompareResult] = {}  # per Telegram chat, for /push
 
     def result_url(self, rid: str) -> str:
         token = f"?t={self.settings.web_token}" if self.settings.web_token else ""
@@ -34,6 +35,26 @@ class App:
         rid = self.store.save_result(to_html(result, self.settings, self.adapters))
         text = to_text(result, self.settings, self.adapters, self.result_url(rid))
         return result, text, rid
+
+    async def push_carts(self, result: CompareResult) -> list[str]:
+        """Put the best plan into your real carts where the platform allows it; otherwise say how."""
+        best = result.best
+        if not best:
+            return ["Nothing to push: no plan."]
+        out = []
+        for platform in best.platforms:
+            a = self.adapters.get(platform)
+            lines = [(m.offer, m.request.qty) for m in best.assignments.values() if m.offer.platform == platform]
+            name = a.label if a else platform
+            if a and a.supports_cart_push:
+                try:
+                    out += [f"{name}: {x}" for x in await a.add_to_cart(lines)]
+                except Exception as e:
+                    out.append(f"{name}: cart push failed: {type(e).__name__}: {e}")
+            else:
+                link = a.cart_link(lines) if a else None
+                out.append(f"{name}: no cart push; " + (f"open {link}" if link else "add the items from the product links"))
+        return out
 
     async def close(self) -> None:
         for a in self.adapters.values():

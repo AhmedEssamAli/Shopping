@@ -44,14 +44,36 @@ min_order = 0
 verified = false
 
 [talabat]
-label = "talabat (Mart & grocery)"
-status = "pending"
-enabled = false
+# Shared settings for every talabat shop below. Find your area with `shopper talabat-shops`;
+# the area is in talabat's URL after you set your address: ...?aid=<area_id>, area slug in the listing URL.
+status = "live"
+enabled = true
+area_id = 8192
+area_slug = "tagammoa-5-sodic"
+max_age_hours = 24          # catalogue snapshot age before it is re-read in the background
+skip_categories = ["tobacco"]
+verified = false            # fees come live from talabat per shop; values here are only a fallback
+# Shops to compare. `shopper talabat-shops` lists all that deliver to you (79 on 2026-10-18).
+# Each one becomes platform "talabat_<branch_id>". Fewer shops = faster daily refresh.
+shops = [
+  {branch_id = 793312, slug = "talabat-mart-tagammoa-5-south-investors", label = "talabat Mart", min_order = 40},
+  {branch_id = 743103, slug = "carrefour-vitali-new-cairo", label = "Carrefour (talabat)", min_order = 150},
+  {branch_id = 678726, slug = "spinneys-tagammoa-5-auc-pirl", label = "Spinneys (talabat)", min_order = 85},
+  {branch_id = 716108, slug = "metro-market-catalyst-m055", label = "Metro (talabat)", min_order = 85},
+  {branch_id = 772757, slug = "lulu-hypermarket-tagammoa-5-hay-1", label = "Lulu (talabat)", min_order = 150},
+  {branch_id = 513473, slug = "zaher-dairy-market-tagammoa-5-hay-2", label = "Zaher Dairy (talabat)", min_order = 75},
+  {branch_id = 743901, slug = "the-grove-market-tagammoa-5-south-investors", label = "The Grove (talabat)", min_order = 50},
+  {branch_id = 768626, slug = "zidan-market-tagammoa-5-hay-2", label = "Zidan Market (talabat)", min_order = 50},
+]
 
 [noon]
 label = "noon"
-status = "pending"
-enabled = false
+status = "browser"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
 
 [carrefour]
 label = "Carrefour Egypt"

@@ -22,6 +22,16 @@ def tip_line(settings: Settings, r) -> str | None:
             f"vs {t.baseline:,.1f}/{u} (−{t.saving_pct:.0f}%)")
 
 
+def snapshot_ages(result: CompareResult, older_than_min: int = 30) -> dict[str, str]:
+    """Platforms whose offers were fetched well before this comparison (catalogue snapshots)."""
+    out = {}
+    for r in result.items:
+        for p, offers in r.candidates.items():
+            if offers and (result.created_at - offers[0].fetched_at).total_seconds() > older_than_min * 60:
+                out[p] = offers[0].fetched_at.astimezone().strftime("%d %b %H:%M")
+    return out
+
+
 def _egp(x: float) -> str:
     return f"EGP {x:,.2f}"
 
@@ -81,6 +91,7 @@ def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     for p, err in result.errors.items():
         out.append(f"⚠ {label(settings, p)}: {err}")
     out.append(f"Prices fetched {result.created_at.astimezone().strftime('%H:%M')}. Check the total in the app before paying.")
+    out += [f"{label(settings, p)} prices are from its catalogue snapshot of {t}." for p, t in snapshot_ages(result).items()]
     if table_url:
         out.append(f"\nFull table: {table_url}")
     return "\n".join(out)
@@ -160,6 +171,7 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     if result.unverified_fees:
         notes.append("Fees not verified (counted as 0): " + ", ".join(label(settings, p) for p in result.unverified_fees))
     notes += [f"{label(settings, p)}: {e}" for p, e in result.errors.items()]
+    notes += [f"{label(settings, p)} prices are from its catalogue snapshot of {t}." for p, t in snapshot_ages(result).items()]
     notes_html = "".join(f"<p class=warn>{escape(n)}</p>" for n in notes)
     when = result.created_at.astimezone().strftime("%Y-%m-%d %H:%M")
     body = (f"<h1>Basket comparison</h1><div class=muted>{escape(settings.area_name)} · prices fetched {when} · "
@@ -167,3 +179,21 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
             f"<h2>Proposal</h2>{plans}{notes_html}<h2>All prices</h2>"
             f"<div class=wrap><table><thead><tr><th>Item</th>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody></table></div>")
     return page("Basket comparison", body)
+
+
+def debug_text(result: CompareResult, settings: Settings, top: int = 3) -> str:
+    """Per platform: how many offers came back and how the best few scored."""
+    from .matching import score
+
+    out = []
+    for r in result.items:
+        out.append(f"\n## {r.request.qty} × {r.request.query}")
+        for p in result.platforms:
+            offers = r.candidates.get(p)
+            if offers is None:
+                out.append(f"  {label(settings, p)}: no response ({result.errors.get(p, 'not searched')})")
+                continue
+            ranked = sorted((score(r.request, o) for o in offers), key=lambda m: -m.score)[:top]
+            out.append(f"  {label(settings, p)}: {len(offers)} offers")
+            out += [f"     {m.score:5.1f} {'EXACT' if m.exact else 'close'} {m.offer.price:>9,.2f}  {m.offer.name}" for m in ranked]
+    return "\n".join(out)

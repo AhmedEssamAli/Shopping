@@ -79,6 +79,10 @@ async def compare(
         a.name: {i: r.matches[a.name] for i, r in enumerate(results) if r.matches.get(a.name)} for a in active
     }
     fees = settings.fees()
+    for a in active:  # a platform's own numbers beat what is typed in platforms.toml
+        live = a.live_fees()
+        if live:
+            fees[a.name] = live
     proposals = optimise(matches, len(requests), fees, max_orders or settings.max_orders, exact_only)
     unverified = [a.name for a in active if not (a.name in fees and fees[a.name].verified)]
     if proposals:

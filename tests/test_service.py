@@ -102,3 +102,12 @@ def test_bot_has_watch_commands(tmp_path):
     s.telegram_token = "123456:TEST"
     commands = {c for h in build_bot(App(s)).handlers[0] for c in getattr(h, "commands", ())}
     assert {"watch", "watches", "unwatch"} <= commands
+
+
+def test_talabat_shops_expand_to_platforms():
+    from shopper.config import load_platforms, REPO_ROOT
+    plats = load_platforms(REPO_ROOT / "config" / "platforms.toml")
+    mart = plats["talabat_793312"]
+    assert "talabat" not in plats and mart.label == "talabat Mart" and mart.status == "live"
+    assert mart.options["area_id"] == 8192 and mart.options["slug"].startswith("talabat-mart")
+    assert mart.fees.min_order == 40 and "talabat_743103" in plats

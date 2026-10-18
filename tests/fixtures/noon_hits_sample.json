@@ -1,0 +1,53 @@
+{
+ "nbHits": 4,
+ "hits": [
+  {
+   "offer_code": "c64cccba30cd206b",
+   "sku": "N70082559V",
+   "catalog_sku": "N70082559V-1",
+   "brand": "Soundcore",
+   "name": "R50i NC by Anker Noise Cancelling Earbuds, Strong and Smart Noise Cancelling, Powerful Bass, 45H Playtime, 2-in-1 Case and Phone Stand, IP54, Wireless Earbuds, Bluetooth 5.4, App Control Black",
+   "price": 1499,
+   "sale_price": 1050,
+   "url": "r50i-nc-by-anker-noise-cancelling-earbuds-strong-and-smart-noise-cancelling-powerful-bass-45h-playtime-2-in-1-case-and-phone-stand-ip54-wireless-earbuds-bluetooth-5-4-app-control-black",
+   "pdp_url": "/r50i-nc-by-anker-noise-cancelling-earbuds-strong-and-smart-noise-cancelling-powerful-bass-45h-playtime-2-in-1-case-and-phone-stand-ip54-wireless-earbuds-bluetooth-5-4-app-control-black/N70082559V/p/?o=c64cccba30cd206b",
+   "is_buyable": true
+  },
+  {
+   "offer_code": "ad2a0a57e72998bf",
+   "sku": "Z9BB8D7CF2B17566FEFBDZ",
+   "catalog_sku": "Z9BB8D7CF2B17566FEFBDZ-1",
+   "brand": null,
+   "name": "4th Generation Bluetooth Earbuds",
+   "price": 1240,
+   "sale_price": 466,
+   "url": "4th-generation-bluetooth-earbuds",
+   "pdp_url": "/4th-generation-bluetooth-earbuds/Z9BB8D7CF2B17566FEFBDZ/p/?o=ad2a0a57e72998bf",
+   "is_buyable": true
+  },
+  {
+   "offer_code": "f1862846f1e8b79c",
+   "sku": "N70084537V",
+   "catalog_sku": "N70084537V-1",
+   "brand": "JOYROOM",
+   "name": "10000 mAh ,JR-PBF12 LED Power Bank – 12 W USB‑C Pd & Dual 2.4 A USB‑A Outputs, Led Battery Display, Ultra-Slim Fireproof Design, Triple‑Device Fast Charging - Black",
+   "price": 444.95,
+   "sale_price": null,
+   "url": "10000-mah-jr-pbf12-led-power-bank-12-w-usb-c-pd-dual-2-4-a-usb-a-outputs-led-battery-display-ultra-slim-fireproof-design-triple-device-fast-charging-black",
+   "pdp_url": "/10000-mah-jr-pbf12-led-power-bank-12-w-usb-c-pd-dual-2-4-a-usb-a-outputs-led-battery-display-ultra-slim-fireproof-design-triple-device-fast-charging-black/N70084537V/p/?o=f1862846f1e8b79c",
+   "is_buyable": true
+  },
+  {
+   "offer_code": "a892dc9152f1d3ce",
+   "sku": "N70158922V",
+   "catalog_sku": "N70158922V-1",
+   "brand": "Samsung",
+   "name": "Galaxy A36 5G Dual SIM Awesome Black 8GB RAM 256GB - Middle East Version",
+   "price": 27999,
+   "sale_price": 22299,
+   "url": "galaxy-a36-5g-dual-sim-awesome-black-8gb-ram-256gb-middle-east-version",
+   "pdp_url": "/galaxy-a36-5g-dual-sim-awesome-black-8gb-ram-256gb-middle-east-version/N70158922V/p/?o=a892dc9152f1d3ce",
+   "is_buyable": true
+  }
+ ]
+}

@@ -45,7 +45,7 @@ def tokens(text: str) -> list[str]:
     return [w for w in words if w not in STOPWORDS]
 
 
-def _has(word: str, pool: list[str]) -> bool:
+def has_word(word: str, pool: list[str]) -> bool:
     return any(w == word or fuzz.ratio(w, word) >= _TOKEN_MATCH for w in pool)
 
 
@@ -58,8 +58,8 @@ def score(request: ItemRequest, offer: Offer) -> Match:
     off = tokens(offer.name)
     if not req:
         return Match(request, offer, 0.0, False)
-    covered = sum(_has(w, off) for w in req) / len(req)
-    extras = [w for w in off if not _has(w, req)]
+    covered = sum(has_word(w, off) for w in req) / len(req)
+    extras = [w for w in off if not has_word(w, req)]
     variant_extras = [w for w in extras if w in VARIANT_WORDS]
 
     s = covered * 100 - 4 * len(extras) - 10 * len(variant_extras)

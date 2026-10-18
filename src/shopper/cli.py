@@ -7,6 +7,8 @@
   shopper basket "<list>" | -f FILE     compare a basket (one item per line)
   shopper health                        check sessions and live adapters
   shopper watch-check                   re-price all watches now and print alerts
+  shopper talabat-shops                 list every talabat grocery shop that delivers to you
+  shopper refresh talabat               re-read all talabat shop catalogues now (or one: talabat_<id>)
   shopper serve                         run Telegram bot + web page (home PC)
 """
 from __future__ import annotations
@@ -22,7 +24,7 @@ from .browser import capture, login
 from .config import load_settings
 from .models import ItemRequest
 from .parsing import parse_list
-from .report import to_html
+from .report import debug_text, to_html
 
 
 def _cmd_platforms(args) -> None:
@@ -61,6 +63,11 @@ async def _compare(requests: list[ItemRequest], args) -> None:
     try:
         result, text, rid = await app.run(requests, max_orders=args.max_orders, exact_only=args.exact)
         print(text)
+        if args.debug:
+            print(debug_text(result, app.settings))
+        if args.push:
+            print("\nCart push:")
+            print("\n".join(await app.push_carts(result)))
         if args.html:
             Path(args.html).write_text(to_html(result, app.settings, app.adapters), encoding="utf-8")
             print(f"\nHTML saved to {args.html}")
@@ -115,6 +122,36 @@ async def _cmd_watch_check(args) -> None:
         await app.close()
 
 
+async def _cmd_refresh(args) -> None:
+    app = App()
+    try:
+        names = [n for n in app.adapters if n.startswith("talabat_")] if args.platform == "talabat" else [args.platform]
+        for n in names:
+            a = app.adapters.get(n)
+            if not hasattr(a, "refresh"):
+                sys.exit(f"{n} has no catalogue to refresh.")
+            snap = await a.refresh()
+            print(f"{a.label}: {len(snap['items'])} items saved at {snap['fetched_at']}")
+    finally:
+        await app.close()
+
+
+async def _cmd_talabat_shops(args) -> None:
+    from .adapters import list_shops
+
+    s = load_settings()
+    o = next((p.options for p in s.platforms.values() if p.options.get("talabat_branch")), {})
+    shops = await list_shops(int(o.get("area_id", 8192)), o.get("area_slug", "tagammoa-5-sodic"))
+    on = {int(p.options["branch_id"]) for p in s.platforms.values() if p.options.get("talabat_branch")}
+    for v in sorted(shops, key=lambda v: v["name"].lower()):
+        if "charity" in v["kind"].lower():
+            continue
+        mark = "*" if v["branch_id"] in on else " "
+        print(f"{mark} {v['name'][:28]:28} fee {str(v['delivery_fee']):>5} min {str(v['min_order']):>4}  {v['kind'][:40]}")
+        print(f'    {{branch_id = {v["branch_id"]}, slug = "{v["slug"]}", label = "{v["name"]} (talabat)"}},')
+    print("\n* = already in config/platforms.toml. Paste lines into [talabat] shops to add more.")
+
+
 async def _cmd_serve(args) -> None:
     import uvicorn
 
@@ -136,6 +173,14 @@ async def _cmd_serve(args) -> None:
     else:
         print("TELEGRAM_BOT_TOKEN not set: web page only.")
     print(f"Web page: {s.web_base_url}/{'?t=' + s.web_token if s.web_token else ''}")
+    async def warm_talabat() -> None:  # one shop at a time, so talabat sees a polite request rate
+        for name, a in app.adapters.items():
+            if name.startswith("talabat_") and s.platforms[name].enabled:
+                try:
+                    await a.snapshot()
+                except Exception as e:
+                    print(f"{a.label}: catalogue download failed: {e}")
+    warm = asyncio.create_task(warm_talabat())  # so the first search is fast
     try:
         await server.serve()
     finally:
@@ -166,9 +211,13 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("--max-orders", type=int, default=None)
         p.add_argument("--html", help="also write the comparison table to this file")
         p.add_argument("--platforms", help="comma-separated subset, e.g. gourmet,seoudi")
+        p.add_argument("--debug", action="store_true", help="show every platform's top candidates and scores")
+        p.add_argument("--push", action="store_true", help="add the best plan to your carts where supported (noon)")
         p.set_defaults(fn=fn)
     sub.add_parser("health").set_defaults(fn=_cmd_health)
     sub.add_parser("watch-check").set_defaults(fn=_cmd_watch_check)
+    p = sub.add_parser("refresh"); p.add_argument("platform"); p.set_defaults(fn=_cmd_refresh)
+    sub.add_parser("talabat-shops").set_defaults(fn=_cmd_talabat_shops)
     sub.add_parser("serve").set_defaults(fn=_cmd_serve)
     args = ap.parse_args(argv)
     if getattr(args, "sync", False):

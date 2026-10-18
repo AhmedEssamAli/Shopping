@@ -19,6 +19,7 @@ class PlatformConfig:
     status: str  # live | browser | pending
     enabled: bool
     fees: PlatformFees
+    options: dict = field(default_factory=dict)  # adapter-specific keys from platforms.toml
 
 
 @dataclass
@@ -61,6 +62,11 @@ class Settings:
 def load_platforms(path: Path) -> dict[str, PlatformConfig]:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     out = {}
+    tal = data.pop("talabat", None)
+    if tal:  # one platform per talabat shop: talabat_<branch_id>
+        shared = {k: v for k, v in tal.items() if k != "shops"}
+        for shop in tal.get("shops", []):
+            data[f"talabat_{shop['branch_id']}"] = {**shared, **shop, "talabat_branch": True}
     for name, d in data.items():
         fees = PlatformFees(
             delivery_fee=float(d.get("delivery_fee", 0)),
@@ -69,7 +75,8 @@ def load_platforms(path: Path) -> dict[str, PlatformConfig]:
             free_delivery_over=d.get("free_delivery_over"),
             verified=bool(d.get("verified", False)),
         )
-        out[name] = PlatformConfig(name, d.get("label", name), d.get("status", "pending"), bool(d.get("enabled", False)), fees)
+        out[name] = PlatformConfig(name, d.get("label", name), d.get("status", "pending"), bool(d.get("enabled", False)),
+                                   fees, dict(d))
     return out
 
 
