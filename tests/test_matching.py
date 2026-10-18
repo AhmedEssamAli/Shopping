@@ -62,3 +62,24 @@ def test_cheapest_exact_wins_over_higher_scoring_exact():
 
 def test_flavour_word_blocks_exact():
     assert not score(ItemRequest("Tiger chips salt"), offer("Tiger Excellence Salt & Vinegar Potato Chips - 75 g", 14.95)).exact
+
+
+from shopper.matching import value_tip
+
+
+def test_value_tip_finds_cheaper_per_litre_pack():
+    req = ItemRequest("Juhayna skimmed milk 1L")
+    single = offer("Juhayna - Milk Skimmed - 1l", 54.95, platform="s")
+    six = offer("Juhayna - Milk Skimmed Save 10LE - 6*1l", 300, platform="s")  # 50/L
+    chosen = best_match(req, [single, six])
+    tip = value_tip(req, chosen, [single, six])
+    assert chosen.offer is single and tip.offer is six and round(tip.saving_pct) == 9
+
+
+def test_value_tip_ignores_variants_and_small_savings():
+    req = ItemRequest("Juhayna skimmed milk 1L")
+    single = offer("Juhayna - Milk Skimmed - 1l", 54.95)
+    lactose = offer("Juhayna - Milk Lactose Skimmed - 6*1l", 200)
+    big = offer("Juhayna - Milk Skimmed - 1.5l", 80)  # 53.3/L, only 3% cheaper
+    chosen = best_match(req, [single, lactose, big])
+    assert value_tip(req, chosen, [single, lactose, big]) is None

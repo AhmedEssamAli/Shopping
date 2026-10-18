@@ -6,6 +6,7 @@
   shopper search "<item>"               compare one item
   shopper basket "<list>" | -f FILE     compare a basket (one item per line)
   shopper health                        check sessions and live adapters
+  shopper watch-check                   re-price all watches now and print alerts
   shopper serve                         run Telegram bot + web page (home PC)
 """
 from __future__ import annotations
@@ -101,28 +102,45 @@ async def _cmd_health(args) -> None:
         await app.close()
 
 
+async def _cmd_watch_check(args) -> None:
+    from .watcher import check_watches
+
+    app = App()
+    try:
+        alerts = await check_watches(app)
+        for w in app.store.list_watches():
+            print(f"#{w.id} chat {w.chat_id}: {w.query} -> {w.last_price} ({w.last_platform})")
+        print("\n".join(text for _, text in alerts) or "No alerts.")
+    finally:
+        await app.close()
+
+
 async def _cmd_serve(args) -> None:
     import uvicorn
 
-    from .bot import build_bot
+    from .bot import build_bot, watch_loop
     from .web import create_app
 
     app = App()
     s = app.settings
     server = uvicorn.Server(uvicorn.Config(create_app(app), host=s.web_host, port=s.web_port, log_level="info"))
     bot = None
+    loop_task = None
     if s.telegram_token:
         bot = build_bot(app)
         await bot.initialize()
         await bot.start()
         await bot.updater.start_polling()
-        print("Telegram bot running.")
+        loop_task = asyncio.create_task(watch_loop(app, bot, s.watch_interval_hours * 3600))
+        print(f"Telegram bot running. Watches re-checked every {s.watch_interval_hours:g} h.")
     else:
         print("TELEGRAM_BOT_TOKEN not set: web page only.")
     print(f"Web page: {s.web_base_url}/{'?t=' + s.web_token if s.web_token else ''}")
     try:
         await server.serve()
     finally:
+        if loop_task:
+            loop_task.cancel()
         if bot:
             await bot.updater.stop()
             await bot.stop()
@@ -150,6 +168,7 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("--platforms", help="comma-separated subset, e.g. gourmet,seoudi")
         p.set_defaults(fn=fn)
     sub.add_parser("health").set_defaults(fn=_cmd_health)
+    sub.add_parser("watch-check").set_defaults(fn=_cmd_watch_check)
     sub.add_parser("serve").set_defaults(fn=_cmd_serve)
     args = ap.parse_args(argv)
     if getattr(args, "sync", False):

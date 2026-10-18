@@ -9,6 +9,19 @@ from .models import Proposal
 from .service import CompareResult
 
 
+def _per(unit: str) -> str:
+    return {"ml": "L", "g": "kg"}.get(unit, "pc")
+
+
+def tip_line(settings: Settings, r) -> str | None:
+    t = r.tip
+    if not t:
+        return None
+    u = _per(t.offer.size.unit)
+    return (f"{t.offer.name} at {label(settings, t.offer.platform)} is {t.unit_price:,.1f}/{u} "
+            f"vs {t.baseline:,.1f}/{u} (−{t.saving_pct:.0f}%)")
+
+
 def _egp(x: float) -> str:
     return f"EGP {x:,.2f}"
 
@@ -59,6 +72,10 @@ def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
                        f"({'+' if diff >= 0 else ''}{diff:,.2f} vs best plan)")
         if best.missing:
             out.append("\nNot found: " + "; ".join(result.items[i].request.query for i in best.missing))
+        tips = [(r, tip_line(settings, r)) for r in result.items if r.tip]
+        if tips:
+            out.append("\nBetter-value packs:")
+            out += [f"  • {r.request.query}: {line}\n    {r.tip.offer.url}" for r, line in tips]
     if result.unverified_fees:
         out.append("\nFees not verified (counted as 0): " + ", ".join(label(settings, p) for p in result.unverified_fees))
     for p, err in result.errors.items():
@@ -134,6 +151,11 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
             plans += _plan_html(result, result.single, settings, adapters, "Best single platform")
     else:
         plans = "<p>No platform had an acceptable match.</p>"
+    tips = [(r, tip_line(settings, r)) for r in result.items if r.tip]
+    if tips:
+        plans += "<div class=plan><div>Better-value packs</div><ul>" + "".join(
+            f"<li>{escape(r.request.query)}: <a href='{escape(r.tip.offer.url)}' target='_blank' rel='noopener'>"
+            f"{escape(line)}</a></li>" for r, line in tips) + "</ul></div>"
     notes = []
     if result.unverified_fees:
         notes.append("Fees not verified (counted as 0): " + ", ".join(label(settings, p) for p in result.unverified_fees))

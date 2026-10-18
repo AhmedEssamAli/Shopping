@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 
 from rapidfuzz import fuzz
 
@@ -87,3 +88,36 @@ def best_match(request: ItemRequest, offers: list[Offer]) -> Match | None:
     if not cands:
         return None
     return min(cands, key=lambda m: (0, 0, m.offer.price) if m.exact else (1, -round(m.score, -1), m.offer.price))
+
+
+@dataclass
+class ValueTip:
+    """Another pack size of the same product that costs less per litre, kg or piece."""
+    offer: Offer
+    unit_price: float
+    baseline: float
+
+    @property
+    def saving_pct(self) -> float:
+        return (1 - self.unit_price / self.baseline) * 100
+
+
+VALUE_TIP_MIN_SAVING = 5.0  # percent
+
+
+def value_tip(request: ItemRequest, chosen: Match | None, candidates: list[Offer]) -> ValueTip | None:
+    """Cheapest-per-unit offer of the same product in a different size, if it saves enough."""
+    if not chosen or not chosen.offer.unit_price or not chosen.offer.size:
+        return None
+    base, unit = chosen.offer.unit_price, chosen.offer.size.unit
+    loose = ItemRequest(strip_sizes(request.query) or request.query, request.qty)
+    best: ValueTip | None = None
+    for o in candidates:
+        up = o.unit_price
+        if o is chosen.offer or not o.in_stock or up is None or o.size.unit != unit:
+            continue
+        if up > base * (1 - VALUE_TIP_MIN_SAVING / 100) or not score(loose, o).exact:
+            continue
+        if best is None or up < best.unit_price:
+            best = ValueTip(o, up, base)
+    return best

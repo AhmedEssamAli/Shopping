@@ -94,3 +94,11 @@ def test_bot_builds_offline(tmp_path):
     bot = build_bot(App(s))
     commands = {c for h in bot.handlers[0] for c in getattr(h, "commands", ())}
     assert {"start", "add", "list", "remove", "clear", "compare"} <= commands
+
+
+def test_bot_has_watch_commands(tmp_path):
+    from shopper.bot import build_bot
+    s = settings(tmp_path)
+    s.telegram_token = "123456:TEST"
+    commands = {c for h in build_bot(App(s)).handlers[0] for c in getattr(h, "commands", ())}
+    assert {"watch", "watches", "unwatch"} <= commands

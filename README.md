@@ -54,6 +54,8 @@ Telegram:
 - Send one line to compare that item now: `2 Juhayna full cream milk 1L`.
 - Send several lines to compare that basket now.
 - `/add <lines>`, `/list`, `/remove 3` and `/clear` keep a running list. `/compare` (or `/compare exact`) compares the saved list.
+- `/watch Nescafe classic 200g @ 250` watches an item. The bot re-prices it every `WATCH_INTERVAL_HOURS` (default 6). It alerts you when the cheapest exact match reaches your price, or drops by more than 1% when no target is set. `/watches` lists them and `/unwatch 3` removes one.
+- Each comparison also lists **better-value packs**: the same product in another size that costs at least 5% less per litre, kg or piece. Example: a 6 × 1 L pack against single litres.
 - Arabic and free text work when `ANTHROPIC_API_KEY` is set. Claude turns `2 لبن جهينة كامل الدسم لتر` into `2 × Juhayna full cream milk 1L`. Without the key, a local parser reads one item per line.
 
 CLI:
@@ -61,8 +63,13 @@ CLI:
 shopper basket -f list.txt --html table.html      # one item per line
 shopper basket "milk 1L x2, rice 5kg" --exact --max-orders 1
 shopper health                                     # live checks + browser session cookies
+shopper watch-check                                # re-price all watches now
 shopper platforms
 ```
+
+## Start automatically on Windows
+
+Run `scripts\windows\install-autostart.cmd` once. It creates a scheduled task that starts `shopper serve` at every logon and logs to `%USERPROFILE%\.shopper\serve.log`. Start it now with `schtasks /Run /TN "shopper"`. Remove it with `schtasks /Delete /TN "shopper" /F`.
 
 ## How it decides
 
@@ -92,8 +99,9 @@ src/shopper/
   parsing.py       list parsing (local, or Claude for Arabic and free text)
   browser.py       persistent profile, login, capture
   report.py        Telegram text and HTML table
+  watcher.py       price watches and alerts
   bot.py · web.py · cli.py · store.py (SQLite price history)
-tests/             58 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             65 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

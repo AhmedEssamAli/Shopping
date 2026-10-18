@@ -37,6 +37,7 @@ class Settings:
     web_port: int = 8765
     web_base_url: str = "http://127.0.0.1:8765"
     web_token: str = ""
+    watch_interval_hours: float = 6.0
 
     @property
     def profile_dir(self) -> Path:
@@ -92,4 +93,5 @@ def load_settings(platforms_file: Path | None = None) -> Settings:
         web_port=int(env("WEB_PORT", "8765")),
         web_base_url=env("WEB_BASE_URL", "http://127.0.0.1:8765").rstrip("/"),
         web_token=env("WEB_TOKEN", ""),
+        watch_interval_hours=float(env("WATCH_INTERVAL_HOURS", "6")),
     )

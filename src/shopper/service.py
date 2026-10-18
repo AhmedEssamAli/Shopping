@@ -8,7 +8,7 @@ from datetime import datetime
 
 from .adapters import Adapter, NotCalibrated
 from .config import Settings
-from .matching import best_match
+from .matching import ValueTip, best_match, value_tip
 from .models import ItemRequest, Match, Offer, Proposal, now_utc
 from .optimizer import best_single, optimise
 from .units import strip_sizes
@@ -21,6 +21,7 @@ class ItemResult:
     request: ItemRequest
     matches: dict[str, Match | None] = field(default_factory=dict)  # platform -> best match
     candidates: dict[str, list[Offer]] = field(default_factory=dict)  # raw offers, for the table
+    tip: ValueTip | None = None  # a cheaper-per-unit pack of the item chosen in the best plan
 
 
 @dataclass
@@ -80,6 +81,10 @@ async def compare(
     fees = settings.fees()
     proposals = optimise(matches, len(requests), fees, max_orders or settings.max_orders, exact_only)
     unverified = [a.name for a in active if not (a.name in fees and fees[a.name].verified)]
+    if proposals:
+        for i, r in enumerate(results):
+            pool = [o for offers in r.candidates.values() for o in offers]
+            r.tip = value_tip(r.request, proposals[0].assignments.get(i), pool)
     return CompareResult(results, [a.name for a in active], proposals, errors, unverified)
 
 
