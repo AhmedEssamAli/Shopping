@@ -1,0 +1,96 @@
+import json
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from shopper.adapters.base import Adapter, NotCalibrated
+from shopper.app import App
+from shopper.config import PlatformConfig, Settings
+from shopper.models import ItemRequest, Offer, PlatformFees
+from shopper.report import to_html, to_text
+from shopper.service import compare
+from shopper.web import create_app
+
+
+class Fake(Adapter):
+    def __init__(self, name, catalogue):
+        self.name, self.label, self.catalogue = name, name.upper(), catalogue
+
+    async def search(self, query, limit=12):
+        return [Offer(self.name, n, p, f"https://{self.name}/{i}") for i, (n, p) in enumerate(self.catalogue)]
+
+
+class Broken(Adapter):
+    name = label = "broken"
+
+    async def search(self, query, limit=12):
+        raise NotCalibrated("not calibrated")
+
+
+def settings(tmp_path, fees=None):
+    fees = fees or {}
+    plats = {n: PlatformConfig(n, n.upper(), "live", True, fees.get(n, PlatformFees())) for n in ("a", "b", "broken")}
+    return Settings(home=tmp_path, platforms=plats)
+
+
+ADAPTERS = {
+    "a": Fake("a", [("Juhayna Full Cream Milk 1L", 60), ("Egyptian Rice 5kg", 200)]),
+    "b": Fake("b", [("Juhayna Full Cream Milk - 1 Liter", 50), ("Egyptian Rice 5 kg", 230)]),
+    "broken": Broken(),
+}
+REQS = [ItemRequest("Juhayna full cream milk 1L", 2), ItemRequest("Egyptian rice 5kg", 1)]
+
+
+async def test_compare_splits_and_reports_errors(tmp_path):
+    s = settings(tmp_path)
+    r = await compare(REQS, s, ADAPTERS)
+    assert r.best.platforms == ("a", "b")
+    assert r.best.total == 2 * 50 + 200
+    assert "broken" in r.errors
+    assert set(r.unverified_fees) == {"a", "b", "broken"}
+
+
+async def test_compare_fees_flip_to_single(tmp_path):
+    fees = {n: PlatformFees(delivery_fee=40, verified=True) for n in ("a", "b")}
+    r = await compare(REQS, settings(tmp_path, fees), ADAPTERS)
+    assert r.best.platforms == ("a",)  # 120+200+40 = 360 beats 100+200+80 = 380
+    assert r.single.platforms == ("a",)
+
+
+async def test_report_renders(tmp_path):
+    s = settings(tmp_path)
+    r = await compare(REQS, s, ADAPTERS)
+    text = to_text(r, s, ADAPTERS, "http://x/r/1")
+    assert "BEST PLAN: A + B" in text and "Full table: http://x/r/1" in text
+    html = to_html(r, s, ADAPTERS)
+    assert "<table>" in html and "https://b/0" in html
+
+
+def test_web_token_and_flow(tmp_path):
+    s = settings(tmp_path)
+    s.web_token = "secret"
+    core = App(s)
+    core.adapters = ADAPTERS
+    client = TestClient(create_app(core))
+    assert client.get("/").status_code == 404
+    assert client.get("/?t=secret").status_code == 200
+    resp = client.post("/compare?t=secret", data={"items": "2 Juhayna full cream milk 1L\nEgyptian rice 5kg", "max_orders": 2},
+                       follow_redirects=True)
+    assert resp.status_code == 200 and "Basket comparison" in resp.text
+    assert client.get("/r/nope?t=secret").status_code == 404
+
+
+def test_platforms_toml_loads():
+    from shopper.config import load_platforms, REPO_ROOT
+    plats = load_platforms(REPO_ROOT / "config" / "platforms.toml")
+    assert plats["seoudi"].status == "live" and plats["breadfast"].status == "pending"
+
+
+def test_bot_builds_offline(tmp_path):
+    from shopper.bot import build_bot
+    s = settings(tmp_path)
+    s.telegram_token = "123456:TEST"
+    s.allowed_chat_ids = {42}
+    bot = build_bot(App(s))
+    commands = {c for h in bot.handlers[0] for c in getattr(h, "commands", ())}
+    assert {"start", "add", "list", "remove", "clear", "compare"} <= commands

@@ -1,0 +1,74 @@
+# Per-platform settings. Copy fee numbers from a real checkout in YOUR area,
+# then set verified = true. Until then the optimiser treats fees as 0 and every
+# proposal is flagged "fees unverified".
+#
+# status:
+#   live     - adapter works without a browser (public catalogue API)
+#   browser  - adapter needs the signed-in browser profile on the home PC
+#   pending  - adapter not calibrated yet; run `shopper capture <platform> "<item>"` on the home PC
+
+[gourmet]
+label = "Gourmet Egypt"
+status = "live"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[seoudi]
+label = "Seoudi Market"
+status = "live"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[spinneys]
+label = "Spinneys Egypt"
+status = "live"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[amazon_eg]
+label = "Amazon.eg"
+status = "browser"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[talabat]
+label = "talabat (Mart & grocery)"
+status = "pending"
+enabled = false
+
+[noon]
+label = "noon"
+status = "pending"
+enabled = false
+
+[carrefour]
+label = "Carrefour Egypt"
+status = "pending"
+enabled = false
+
+[instashop]
+label = "Instashop (incl. Mahmoud ElFar)"
+status = "pending"
+enabled = false
+
+[breadfast]
+label = "Breadfast"
+status = "pending"   # app-only: website has no shop, only app-store links
+enabled = false
+
+[rabbit]
+label = "Rabbit"
+status = "pending"   # app-first; web shop not verified
+enabled = false

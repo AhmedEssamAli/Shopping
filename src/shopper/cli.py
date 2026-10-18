@@ -1,0 +1,162 @@
+"""shopper — command line.
+
+  shopper platforms                     status of every platform
+  shopper login <platform|all>          sign in once in the persistent browser profile
+  shopper capture <platform>            record a platform's search traffic for calibration
+  shopper search "<item>"               compare one item
+  shopper basket "<list>" | -f FILE     compare a basket (one item per line)
+  shopper health                        check sessions and live adapters
+  shopper serve                         run Telegram bot + web page (home PC)
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import sys
+from pathlib import Path
+
+from .app import App
+from .browser import capture, login
+from .config import load_settings
+from .models import ItemRequest
+from .parsing import parse_list
+from .report import to_html
+
+
+def _cmd_platforms(args) -> None:
+    s = load_settings()
+    for p in s.platforms.values():
+        fee = "fees verified" if p.fees.verified else "fees not verified"
+        print(f"{p.name:10} {p.status:8} {'on ' if p.enabled else 'off'}  {p.label}  ({fee})")
+
+
+async def _cmd_login(args) -> None:
+    app = App()
+    names = [n for n in app.adapters if n not in ("gourmet", "seoudi", "spinneys")] if args.platform == "all" else [args.platform]
+    for n in names:
+        a = app.adapters.get(n)
+        if not a:
+            sys.exit(f"Unknown platform: {n}")
+        await login(app.settings, a.label, a.login_url)
+    await app.close()
+
+
+async def _cmd_capture(args) -> None:
+    app = App()
+    a = app.adapters.get(args.platform)
+    if not a:
+        sys.exit(f"Unknown platform: {args.platform}")
+    await capture(app.settings, args.platform, a.login_url)
+    await app.close()
+
+
+async def _compare(requests: list[ItemRequest], args) -> None:
+    app = App()
+    if args.platforms:
+        only = set(args.platforms.split(","))
+        for p in app.settings.platforms.values():
+            p.enabled = p.name in only
+    try:
+        result, text, rid = await app.run(requests, max_orders=args.max_orders, exact_only=args.exact)
+        print(text)
+        if args.html:
+            Path(args.html).write_text(to_html(result, app.settings, app.adapters), encoding="utf-8")
+            print(f"\nHTML saved to {args.html}")
+    finally:
+        await app.close()
+
+
+async def _cmd_search(args) -> None:
+    await _compare([ItemRequest(args.item, 1)], args)
+
+
+async def _cmd_basket(args) -> None:
+    text = Path(args.file).read_text(encoding="utf-8") if args.file else (args.items or "")
+    requests = parse_list(text, load_settings().anthropic_key)
+    if not requests:
+        sys.exit("Empty list.")
+    await _compare(requests, args)
+
+
+async def _cmd_health(args) -> None:
+    app = App()
+    try:
+        for p in app.settings.platforms.values():
+            a = app.adapters.get(p.name)
+            if not p.enabled or a is None:
+                print(f"{p.name:10} off")
+                continue
+            if p.status == "live":
+                try:
+                    n = len(await a.search("milk", 3))
+                    print(f"{p.name:10} live     search ok ({n} results)")
+                except Exception as e:
+                    print(f"{p.name:10} live     FAILED {type(e).__name__}: {e}")
+            elif app.browser:
+                n = await app.browser.cookie_count(a.login_url)
+                hint = "" if n else "  -> run: shopper login " + p.name
+                print(f"{p.name:10} browser  {n} cookies in profile{hint}")
+    finally:
+        await app.close()
+
+
+async def _cmd_serve(args) -> None:
+    import uvicorn
+
+    from .bot import build_bot
+    from .web import create_app
+
+    app = App()
+    s = app.settings
+    server = uvicorn.Server(uvicorn.Config(create_app(app), host=s.web_host, port=s.web_port, log_level="info"))
+    bot = None
+    if s.telegram_token:
+        bot = build_bot(app)
+        await bot.initialize()
+        await bot.start()
+        await bot.updater.start_polling()
+        print("Telegram bot running.")
+    else:
+        print("TELEGRAM_BOT_TOKEN not set: web page only.")
+    print(f"Web page: {s.web_base_url}/{'?t=' + s.web_token if s.web_token else ''}")
+    try:
+        await server.serve()
+    finally:
+        if bot:
+            await bot.updater.stop()
+            await bot.stop()
+            await bot.shutdown()
+        await app.close()
+
+
+def main(argv: list[str] | None = None) -> None:
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    ap = argparse.ArgumentParser(prog="shopper", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("platforms").set_defaults(fn=_cmd_platforms, sync=True)
+    p = sub.add_parser("login"); p.add_argument("platform"); p.set_defaults(fn=_cmd_login)
+    p = sub.add_parser("capture"); p.add_argument("platform"); p.set_defaults(fn=_cmd_capture)
+    for name, fn in (("search", _cmd_search), ("basket", _cmd_basket)):
+        p = sub.add_parser(name)
+        if name == "search":
+            p.add_argument("item")
+        else:
+            p.add_argument("items", nargs="?")
+            p.add_argument("-f", "--file")
+        p.add_argument("--exact", action="store_true", help="only exact matches")
+        p.add_argument("--max-orders", type=int, default=None)
+        p.add_argument("--html", help="also write the comparison table to this file")
+        p.add_argument("--platforms", help="comma-separated subset, e.g. gourmet,seoudi")
+        p.set_defaults(fn=fn)
+    sub.add_parser("health").set_defaults(fn=_cmd_health)
+    sub.add_parser("serve").set_defaults(fn=_cmd_serve)
+    args = ap.parse_args(argv)
+    if getattr(args, "sync", False):
+        args.fn(args)
+    else:
+        asyncio.run(args.fn(args))
+
+
+if __name__ == "__main__":
+    main()

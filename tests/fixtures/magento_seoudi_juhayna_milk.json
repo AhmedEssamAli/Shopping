@@ -1,0 +1,212 @@
+{
+    "data": {
+        "products": {
+            "items": [
+                {
+                    "name": "Juhayna Full Cream Milk - 200 ml",
+                    "sku": "6223000350010",
+                    "url_key": "juhayna-full-cream-milk-200-ml",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 12.75,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 12.75
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Skimmed Milk - 1 Liter",
+                    "sku": "6223000350089",
+                    "url_key": "juhayna-skimmed-milk-1-liter",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 55.45,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 55.45
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Skimmed Milk  - 200 ml",
+                    "sku": "6223000350201",
+                    "url_key": "juhayna-skimmed-milk-200-ml",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 12.75,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 12.75
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna mix Chocolate Milk - 200 ml",
+                    "sku": "6223000350423",
+                    "url_key": "juhayna-mix-chocolate-milk-200-ml",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 12.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 12.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna mix Strawberry Milk - 200 ml",
+                    "sku": "6223000350430",
+                    "url_key": "juhayna-mix-strawberry-milk-200-ml",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 12.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 12.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna N&G Unsweetened Almond Milk - 1 Liter",
+                    "sku": "6222014312427",
+                    "url_key": "juhayna-almond-milk-1liter",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 149.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 149.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Mix Low Sugar Chocolate Milk - 200 ml",
+                    "sku": "6222014301063",
+                    "url_key": "juhayna-mix-low-sugar-chocolate-milk-200-ml",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 12.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 12.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna N&G Barista Oat Milk - 500 ml",
+                    "sku": "6222014301278",
+                    "url_key": "juhayna-barista-oat-milk-500-ml",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 79.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 79.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna N&G Barista Almond Milk - 500 ml",
+                    "sku": "6222014301292",
+                    "url_key": "juhayna-barista-almond-milk-500-ml",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 79.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 79.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Mix Chocolate Milk, 200 ml - Pack of 27",
+                    "sku": "6222014311239",
+                    "url_key": "",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 320.45,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 320.45
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Half Cream Milk, 1 Liter, Pack of 6 - Discount%",
+                    "sku": "6222014300981",
+                    "url_key": "\u062c\u0647\u064a\u0646\u0647-\u0644\u0628\u0646-\u0646\u0635\u0641-\u062f\u0633\u0645\u060c-1-\u0644\u062a\u0631-\u0639\u0628\u0648\u0629-\u0645\u0646-6-\u0642\u0637\u0639",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 299.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 322.75
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna N&G Barista Oat Milk - 1 Liter",
+                    "sku": "6222014312519",
+                    "url_key": "juhayna-oat-milk-1-liter",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 149.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 149.95
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}
