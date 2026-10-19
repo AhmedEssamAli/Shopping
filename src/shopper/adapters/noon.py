@@ -4,7 +4,10 @@ Verified from a capture on the home PC (2026-10-18):
 - the catalogue API returns ``hits`` with offer_code, sku, brand, name, price,
   sale_price, pdp_url and is_buyable;
 - add-to-cart is ``POST /_vs/nc/mp-noon-api-cart/cart/item/<offer_code>/<qty>?showCart``
-  with body ``{}``.
+  with body ``{}``. Sent by shopper's own fetch, noon answered 403 (home PC, 2026-10-19),
+  so cart push presses the product page's Add to Cart button and lets noon's own code send
+  that call. The button text is not verified; the push only reports "added" when noon
+  answers 200 to the call for this exact offer code.
 - (2026-10-19, home-PC dump) the search page renders results into the page, not via a
   JSON call: each tile is ``[data-qa=plp-product-box]`` with ``plp-product-box-name``
   (full title in ``title``), ``plp-product-box-price`` and a ``/p/?o=<offer_code>`` link.
@@ -35,11 +38,7 @@ TILES_JS = """() => [...document.querySelectorAll('[data-qa="plp-product-box"]')
             price: now || '', was: was || ''};
   }).filter(x => x.href && x.name && x.price)"""
 
-CART_ADD_JS = """async ([code, qty]) => {
-  const r = await fetch(`/_vs/nc/mp-noon-api-cart/cart/item/${code}/${qty}?showCart`, {
-    method: 'POST', credentials: 'include', headers: {'content-type': 'application/json'}, body: '{}'});
-  return r.status;
-}"""
+ADD_BUTTON = '[data-qa*="add-to-cart" i], button:has-text("Add to cart")'
 
 
 # Personalised feeds on every noon page also carry "hits"; never take them for results.
@@ -176,14 +175,43 @@ class NoonAdapter(Adapter):
             ))
         return out
 
+    button_timeout_ms = 15000
+
     async def add_to_cart(self, lines: list[tuple[Offer, int]]) -> list[str]:
         page = await self.session.new_page()
         out = []
         try:
-            await page.goto(f"{BASE}/", wait_until="domcontentloaded", timeout=45000)
             for offer, qty in lines:
-                status = await page.evaluate(CART_ADD_JS, [offer.cart_ref, qty])
-                out.append(f"{'added' if status == 200 else f'FAILED (HTTP {status})'}: {qty} × {offer.name}")
+                out.append(await self._add_one(page, offer, qty))
         finally:
             await page.close()
         return out
+
+    async def _add_one(self, page, offer: Offer, qty: int) -> str:
+        what = f"{qty} × {offer.name}"
+        code = offer.cart_ref
+
+        async def set_qty(route):  # the button adds 1; ask for the full quantity in the same call
+            await route.continue_(url=re.sub(rf"/cart/item/{code}/\d+", f"/cart/item/{code}/{qty}", route.request.url))
+
+        pattern = f"**/cart/item/{code}/**"
+        await page.route(pattern, set_qty)
+        try:
+            await page.goto(offer.url, wait_until="domcontentloaded", timeout=45000)
+            button = page.locator(ADD_BUTTON).first
+            try:
+                await button.wait_for(state="visible", timeout=self.button_timeout_ms)
+            except Exception:
+                dump = dump_page(self.session.settings, self.name, code, await page.content(), {"url": page.url})
+                return f"FAILED (no Add to Cart button; page saved to {dump}): {what}"
+            try:
+                async with page.expect_response(lambda r: f"/cart/item/{code}/" in r.url and r.request.method == "POST",
+                                                timeout=15000) as resp:
+                    await button.click()
+                status = (await resp.value).status
+            except Exception:
+                dump = dump_page(self.session.settings, self.name, code, await page.content(), {"url": page.url})
+                return f"NOT CONFIRMED (noon sent no cart call for this offer; page saved to {dump}): {what}"
+        finally:
+            await page.unroute(pattern, set_qty)
+        return f"added: {what}" if status == 200 else f"FAILED (HTTP {status}): {what}"

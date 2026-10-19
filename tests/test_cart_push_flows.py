@@ -83,3 +83,41 @@ async def test_instashop_search_reads_results_popup(browser, tmp_path):
     assert len(offers) == 4 and all(o.url.endswith("/mahmoud-elfar-mivida") for o in offers)
     jar = best_match(ItemRequest("Nescafe classic 190g"), offers)
     assert jar.exact and jar.offer.price == 317.95
+
+
+NOON_PDP = """<html><body><h1>Nescafe Classic Sachet 200grams</h1>
+<button data-qa="pdp-add-to-cart" onclick="fetch('/_vs/nc/mp-noon-api-cart/cart/item/bc050c6c/1?showCart',
+  {method: 'POST', body: '{}'})">Add to cart</button></body></html>"""
+
+
+async def test_noon_add_to_cart_presses_button_with_full_quantity(browser, tmp_path):
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from shopper.adapters.noon import NoonAdapter
+
+    posts = []
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200); self.send_header("content-type", "text/html"); self.end_headers()
+            self.wfile.write(NOON_PDP.encode())
+
+        def do_POST(self):
+            posts.append(self.path)
+            self.send_response(200 if "/bc050c6c/" in self.path else 403); self.end_headers()
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        ctx = await browser.new_context()
+        a = NoonAdapter(FakeSession(ctx, tmp_path))
+        url = f"http://127.0.0.1:{srv.server_port}/egypt-en/x/N1/p/?o=bc050c6c"
+        out = await a.add_to_cart([(Offer("noon", "Nescafe Classic Sachet 200grams", 341, url, cart_ref="bc050c6c"), 3)])
+    finally:
+        srv.shutdown()
+    assert out == ["added: 3 × Nescafe Classic Sachet 200grams"]
+    assert posts == ["/_vs/nc/mp-noon-api-cart/cart/item/bc050c6c/3?showCart"]

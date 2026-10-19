@@ -10,7 +10,7 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
 |---|---|---|
 | Gourmet Egypt, Seoudi Market, Spinneys Egypt | **live**, tested 2026-10-18 | public Magento GraphQL catalogue, no login |
 | **talabat grocery shops**: talabat Mart, Carrefour, Spinneys, Metro, Lulu, Zaher Dairy, The Grove, Zidan (79 shops deliver to Tagammoa 5) | **live**, tested 2026-10-18 | talabat's own data routes, no login; each shop's catalogue is saved daily and searched locally; delivery fee and minimum order come live from talabat |
-| noon | **search live on the home PC**, tested 2026-10-19; cart push built, not yet verified live | Shopping Chrome. On a failed search, shopper saves the page to `~/.shopper/captures/noon/failed-search-*`; send that folder |
+| noon | **search live on the home PC**, tested 2026-10-19; cart push rebuilt, not yet verified live | Shopping Chrome. Cart push presses Add to Cart on the product page; noon refused shopper's direct cart call (HTTP 403). On a failed search, shopper saves the page to `~/.shopper/captures/noon/failed-search-*`; send that folder |
 | Amazon.eg | **search and cart push live on the home PC**, tested 2026-10-19 | Shopping Chrome. Cart push opens each product and presses Add to Cart. Amazon's cart-link form did not add items on .eg, so shopper no longer shows it |
 | Instashop shops (Mahmoud ElFar by default) | **search live on the home PC**, tested 2026-10-19 | reads the shop page in Shopping Chrome. shopper types the query, presses Enter and reads the results popup (verified from your dump). The popup has no product links, so offers link to the shop page. The product tiles are verified from your capture. Instashop encrypts its API and requires reCAPTCHA, and shopper does not bypass either |
 | Carrefour direct site | not needed | Carrefour comes through talabat |
@@ -112,7 +112,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · cli.py · store.py (SQLite price history)
-tests/             88 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             89 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.
