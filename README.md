@@ -10,9 +10,9 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
 |---|---|---|
 | Gourmet Egypt, Seoudi Market, Spinneys Egypt | **live**, tested 2026-10-18 | public Magento GraphQL catalogue, no login |
 | **talabat grocery shops**: talabat Mart, Carrefour, Spinneys, Metro, Lulu, Zaher Dairy, The Grove, Zidan (79 shops deliver to Tagammoa 5) | **live**, tested 2026-10-18 | talabat's own data routes, no login; each shop's catalogue is saved daily and searched locally; delivery fee and minimum order come live from talabat |
-| noon | **built, search not yet working** | Shopping Chrome. On a failed search, shopper saves the page to `~/.shopper/captures/noon/failed-search-*`; send that folder |
-| Amazon.eg | **search live on the home PC**; cart push built, not yet verified live | Shopping Chrome. Cart push opens each product and presses Add to Cart. Amazon's cart-link form did not add items on .eg, so shopper no longer shows it |
-| Instashop shops (Mahmoud ElFar by default) | **built, search not verified live** | reads the shop page in Shopping Chrome. shopper types the query, presses Enter and reads the results popup (verified from your dump). The popup has no product links, so offers link to the shop page. The product tiles are verified from your capture. Instashop encrypts its API and requires reCAPTCHA, and shopper does not bypass either |
+| noon | **search live on the home PC**, tested 2026-10-19; cart push built, not yet verified live | Shopping Chrome. On a failed search, shopper saves the page to `~/.shopper/captures/noon/failed-search-*`; send that folder |
+| Amazon.eg | **search and cart push live on the home PC**, tested 2026-10-19 | Shopping Chrome. Cart push opens each product and presses Add to Cart. Amazon's cart-link form did not add items on .eg, so shopper no longer shows it |
+| Instashop shops (Mahmoud ElFar by default) | **search live on the home PC**, tested 2026-10-19 | reads the shop page in Shopping Chrome. shopper types the query, presses Enter and reads the results popup (verified from your dump). The popup has no product links, so offers link to the shop page. The product tiles are verified from your capture. Instashop encrypts its API and requires reCAPTCHA, and shopper does not bypass either |
 | Carrefour direct site | not needed | Carrefour comes through talabat |
 | Breadfast, Rabbit | **pending** | Breadfast's website has only app-store links; Rabbit is app-first |
 
