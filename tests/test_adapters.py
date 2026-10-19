@@ -50,13 +50,11 @@ def test_parse_price(text, value):
     assert parse_price(text) == value
 
 
-def test_amazon_cart_link():
+def test_amazon_pushes_instead_of_cart_link():
+    # The /gp/aws/cart/add.html link did not add items on Amazon.eg (2026-10-19).
     a = AmazonEgAdapter(session=None)
-    o1 = Offer("amazon_eg", "x", 10, "u", cart_ref="B000000001")
-    o2 = Offer("amazon_eg", "y", 20, "u", cart_ref="B000000002")
-    link = a.cart_link([(o1, 2), (o2, 1)])
-    assert link == ("https://www.amazon.eg/gp/aws/cart/add.html?"
-                    "ASIN.1=B000000001&Quantity.1=2&ASIN.2=B000000002&Quantity.2=1")
+    assert a.cart_link([(Offer("amazon_eg", "x", 10, "u", cart_ref="B000000001"), 2)]) is None
+    assert a.supports_cart_push
 
 
 # Synthetic page in Amazon's search-result markup (not a live capture).

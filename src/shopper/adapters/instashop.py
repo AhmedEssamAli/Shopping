@@ -6,8 +6,14 @@ same tiles you see on screen.
 
 Verified from a home-PC capture (2026-10-18): each product is an ``app-product`` with
 ``.product-title``, ``.product-packaging-string`` (size), ``.price-txt`` (EGP price) and a
-``/product/<id>`` link. Not yet verified: that typing in the shop's search box
-(``input[formcontrolname=query]``) lists matching products as the same tiles.
+``/product/<id>`` link.
+
+Search (from a failed-search dump, 2026-10-19): the header box
+``input[formcontrolname=query]`` ("Search for shops, categories or products") is a
+type-ahead. It lists suggestions in ``.results nb-list-item`` while you type; pressing Enter
+only closes that list and leaves the shop page as it was. So shopper types the query, waits
+for the suggestions, and opens the one that best matches. Not yet verified: what a
+suggestion opens (a product list or one product).
 """
 from __future__ import annotations
 
@@ -33,6 +39,12 @@ EXTRACT_JS = """() => [...new Set([...document.querySelectorAll('.product-title'
             href: link ? link.href : '', id: link ? link.getAttribute('href').split('/product/')[1] : ''};
   }).filter(x => x.title && x.price)"""
 
+SUGGESTION_SELECTOR = ".results nb-list-item, .results a, .results li"
+SUGGESTIONS_JS = """() => [...document.querySelectorAll('""" + SUGGESTION_SELECTOR + """')]
+  .map((el, i) => ({i, text: (el.innerText || '').replace(/\\s+/g, ' ').trim(),
+                    href: (el.closest('a') || el.querySelector('a'))?.href || ''}))
+  .filter(x => x.text)"""
+
 _NUM = re.compile(r"\d+(?:[.,]\d+)?")
 
 
@@ -52,25 +64,51 @@ class InstashopAdapter(Adapter):
 
     async def search(self, query: str, limit: int = 12) -> list[Offer]:
         page = await self.session.new_page()
+        want = tokens(query)
         try:
             await page.goto(self.login_url, wait_until="domcontentloaded", timeout=45000)
             box = page.locator("input[formcontrolname=query]").first
             await box.wait_for(timeout=20000)
-            await box.fill(query)
-            await box.press("Enter")
-            want = tokens(query)
-            rows: list[dict] = []
-            for _ in range(int(self.wait_s * 2)):  # wait until the tiles reflect the query
-                await page.wait_for_timeout(500)
-                rows = await safe_evaluate(page, EXTRACT_JS, [])
-                if any(any(has_word(w, tokens(r["title"])) for w in want) for r in rows):
-                    break
+            await box.click()
+            await box.press_sequentially(query, delay=60)  # key by key, so the type-ahead fires
+            rows, suggestions = await self._poll(page, want, suggestions=True)
+            listing = await page.content() if suggestions else ""
+            if not self._relevant(rows, want) and suggestions:
+                pick = max(suggestions, key=lambda x: sum(has_word(w, tokens(x["text"])) for w in want))
+                await page.locator(SUGGESTION_SELECTOR).nth(pick["i"]).click()
+                rows, _ = await self._poll(page, want)
+            if not self._relevant(rows, want) and not suggestions:
+                await box.press("Enter")
+                rows, _ = await self._poll(page, want)
             if not rows:
-                dump = dump_page(self.session.settings, self.name, query, await page.content(), {"url": page.url})
+                extra = {"suggestions.html": listing} if listing else None
+                dump = dump_page(self.session.settings, self.name, query, await page.content(),
+                                 {"url": page.url, "suggestions": suggestions}, extra)
                 raise RuntimeError(f"{self.label}: no products after searching. Saved the page to {dump} — send me that folder.")
         finally:
             await page.close()
         return self.parse(rows)[:limit]
+
+    @staticmethod
+    def _relevant(rows: list[dict], want: list[str]) -> bool:
+        return any(any(has_word(w, tokens(r["title"])) for w in want) for r in rows)
+
+    async def _poll(self, page, want: list[str], suggestions: bool = False) -> tuple[list[dict], list[dict]]:
+        """Wait until product tiles reflect the query, or (if asked) the type-ahead lists suggestions."""
+        rows: list[dict] = []
+        sugg: list[dict] = []
+        for _ in range(int(self.wait_s * 2)):
+            await page.wait_for_timeout(500)
+            rows = await safe_evaluate(page, EXTRACT_JS, [])
+            if self._relevant(rows, want):
+                break
+            if suggestions:
+                sugg = await safe_evaluate(page, SUGGESTIONS_JS, [])
+                if sugg:
+                    await page.wait_for_timeout(1000)  # let the list finish filling
+                    sugg = await safe_evaluate(page, SUGGESTIONS_JS, sugg)
+                    break
+        return rows, sugg
 
     def parse(self, rows: list[dict]) -> list[Offer]:
         out, seen = [], set()

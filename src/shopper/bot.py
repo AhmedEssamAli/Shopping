@@ -8,7 +8,7 @@ Send a message:
   /compare [exact]   -> compare the saved list
   /watch <item> [@ price]  -> alert me when it drops (or reaches the price)
   /watches /unwatch N
-  /push              -> add your last best plan to your carts where supported (noon)
+  /push              -> add your last best plan to your carts where supported (noon, Amazon)
 """
 from __future__ import annotations
 

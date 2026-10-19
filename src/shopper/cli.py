@@ -240,7 +240,7 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("--html", help="also write the comparison table to this file")
         p.add_argument("--platforms", help="comma-separated subset, e.g. gourmet,seoudi")
         p.add_argument("--debug", action="store_true", help="show every platform's top candidates and scores")
-        p.add_argument("--push", action="store_true", help="add the best plan to your carts where supported (noon)")
+        p.add_argument("--push", action="store_true", help="add the best plan to your carts where supported (noon, Amazon)")
         p.set_defaults(fn=fn)
     sub.add_parser("health").set_defaults(fn=_cmd_health)
     sub.add_parser("watch-check").set_defaults(fn=_cmd_watch_check)

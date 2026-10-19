@@ -1,14 +1,16 @@
-"""Amazon.eg through the signed-in browser profile.
+"""Amazon.eg through the signed-in Shopping Chrome.
 
-Status: NOT verified against live Amazon.eg (Amazon blocks cloud IPs). The selectors are
-Amazon's long-standing search-result markup; confirm with `shopper search` on the home PC.
+Search is verified live on the home PC (2026-10-18). Cart push opens each product page and
+presses Add to Cart, the same as you would. Its selectors (``#add-to-cart-button``,
+``select#quantity``, ``#nav-cart-count``) are Amazon's long-standing product-page markup,
+not yet verified on Amazon.eg; a failed push saves the page for diagnosis.
 """
 from __future__ import annotations
 
 import re
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import quote_plus
 
-from ..browser import BrowserSession
+from ..browser import BrowserSession, dump_page, safe_evaluate
 from ..models import Offer
 from .base import Adapter
 
@@ -29,6 +31,11 @@ EXTRACT_JS = """() => [...document.querySelectorAll('div[data-component-type="s-
             price: now ? now.textContent : null, regular: was ? was.textContent : null, sponsored};
   })
   .filter(x => x.asin && x.title)"""
+
+CART_COUNT_JS = """() => { const e = document.querySelector('#nav-cart-count');
+  const n = e ? parseInt((e.textContent || '').replace(/[^0-9]/g, ''), 10) : NaN; return isNaN(n) ? null : n; }"""
+ADDED_JS = """() => !!document.querySelector('#NATC_SMART_WAGON_CONF_MSG_SUCCESS, #sw-atc-confirmation, '
+  + '#attach-added-to-cart-message, #huc-v2-order-row-confirm-text, #sw-atc-details-single-container')"""
 
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩٫٬", "0123456789.,")
 
@@ -84,10 +91,49 @@ class AmazonEgAdapter(Adapter):
             )
         return offers
 
-    def cart_link(self, lines: list[tuple[Offer, int]]) -> str | None:
-        # Amazon's documented Add-to-Cart form; .eg support not yet confirmed live.
-        params = {}
-        for i, (o, qty) in enumerate(lines, start=1):
-            params[f"ASIN.{i}"] = o.cart_ref
-            params[f"Quantity.{i}"] = qty
-        return f"{BASE}/gp/aws/cart/add.html?{urlencode(params)}" if params else None
+    # No cart_link: Amazon's /gp/aws/cart/add.html form did not add items on Amazon.eg
+    # (tested 2026-10-19). Cart push below replaces it.
+    supports_cart_push = True
+    button_timeout_ms = 15000
+
+    async def add_to_cart(self, lines: list[tuple[Offer, int]]) -> list[str]:
+        page = await self.session.new_page()
+        out = []
+        try:
+            for offer, qty in lines:
+                out.append(await self._add_one(page, offer, qty))
+        finally:
+            await page.close()
+        return out
+
+    async def _add_one(self, page, offer: Offer, qty: int, wait_s: float = 15) -> str:
+        what = f"{qty} × {offer.name}"
+        await page.goto(f"{BASE}/dp/{offer.cart_ref}", wait_until="domcontentloaded", timeout=45000)
+        if await page.locator("form[action*='validateCaptcha']").count():
+            return f"FAILED (captcha; solve it in Shopping Chrome and retry): {what}"
+        button = page.locator("#add-to-cart-button").first
+        try:
+            await button.wait_for(state="visible", timeout=self.button_timeout_ms)
+        except Exception:
+            dump = dump_page(self.session.settings, self.name, offer.cart_ref, await page.content(), {"url": page.url})
+            return f"FAILED (no Add to Cart button: out of stock or only other sellers; page saved to {dump}): {what}"
+        before = await safe_evaluate(page, CART_COUNT_JS, None)
+        qty_set = qty == 1
+        if qty > 1 and await page.locator("select#quantity").count():
+            try:
+                await page.locator("select#quantity").first.select_option(str(qty), timeout=5000)
+                qty_set = True
+            except Exception:
+                pass
+        await button.click()
+        after = before
+        for _ in range(int(wait_s * 2)):
+            await page.wait_for_timeout(500)
+            after = await safe_evaluate(page, CART_COUNT_JS, after)
+            if (before is not None and after is not None and after > before) or await safe_evaluate(page, ADDED_JS, False):
+                break
+        else:
+            dump = dump_page(self.session.settings, self.name, offer.cart_ref, await page.content(), {"url": page.url})
+            return f"NOT CONFIRMED (cart count stayed {before}; page saved to {dump}): {what}"
+        note = "" if qty_set else f" (added 1; set the quantity to {qty} in the cart)"
+        return f"added{note}: {what}"
