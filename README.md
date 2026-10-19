@@ -80,7 +80,7 @@ Run `scripts\windows\install-autostart.cmd` once. Also put a shortcut to `script
 
 ## talabat shops
 
-`shopper talabat-shops` lists every grocery shop talabat delivers from to your area, with its fee and minimum order, and prints a ready line for each. Paste lines into `shops = [...]` under `[talabat]` in `config/platforms.toml` to compare more shops. Each shop's catalogue (1,000 to 9,000 items) downloads in the background when `shopper serve` starts and again once a day, so searches stay instant. `shopper refresh talabat` forces it now.
+`shopper talabat-shops` lists every grocery shop talabat delivers from to your area, with its fee and minimum order, and prints a ready line for each. Paste lines into `shops = [...]` under `[talabat]` in `config/platforms.toml` to compare more shops. Each shop's catalogue (1,000 to 9,000 items) downloads in the background when `shopper serve` starts and again once a day, so searches stay instant. `shopper refresh talabat` forces it now. On a fresh install, run it once before your first search. It downloads one shop at a time, politely: about 10–15 minutes for eight shops. While a shop is still downloading, searches skip it and say so.
 
 ## How it decides
 
@@ -112,7 +112,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · cli.py · store.py (SQLite price history)
-tests/             80 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             84 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

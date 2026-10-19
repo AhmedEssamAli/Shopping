@@ -103,6 +103,7 @@ class ValueTip:
 
 
 VALUE_TIP_MIN_SAVING = 5.0  # percent
+VALUE_TIP_MIN_SIZE_RATIO = 0.2  # alternative pack must be at least 1/5 of the chosen size
 
 
 def value_tip(request: ItemRequest, chosen: Match | None, candidates: list[Offer]) -> ValueTip | None:
@@ -116,6 +117,8 @@ def value_tip(request: ItemRequest, chosen: Match | None, candidates: list[Offer
         up = o.unit_price
         if o is chosen.offer or not o.in_stock or up is None or o.size.unit != unit:
             continue
+        if o.size.total < VALUE_TIP_MIN_SIZE_RATIO * chosen.offer.size.total:
+            continue  # twenty 250 g packs are not a sensible swap for one 5 kg bag
         if up > base * (1 - VALUE_TIP_MIN_SAVING / 100) or not score(loose, o).exact:
             continue
         if best is None or up < best.unit_price:

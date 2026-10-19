@@ -72,3 +72,16 @@ def test_instashop_shops_expand_to_platforms():
     plats = load_platforms(REPO_ROOT / "config" / "platforms.toml")
     p = plats["instashop_mahmoud_elfar_mivida"]
     assert p.status == "browser" and p.options["slug"] == "mahmoud-elfar-mivida" and "instashop" not in plats
+
+
+@needs_chromium
+async def test_noon_reads_real_plp_tiles_and_skips_ads():
+    from shopper.adapters.noon import TILES_JS, tiles_to_hits
+    rows = await run_js((FIX / "noon_plp_boxes.html").read_text(encoding="utf-8"), TILES_JS)
+    hits = tiles_to_hits(rows)
+    assert hits and all("Tora Bika" not in h["name"] for h in hits)  # sponsored widget skipped
+    offers = NoonAdapter(session=None).parse(hits)
+    sachet = next(o for o in offers if o.name == "Nescafe Classic Sachet 200grams")
+    assert sachet.price == 341 and sachet.regular_price == 379 and sachet.cart_ref == "bc050c6c3a83d5fe"
+    assert sachet.url == "https://www.noon.com/egypt-en/classic-sachet-200grams/N28968548A/p/?o=bc050c6c3a83d5fe"
+    assert best_match(ItemRequest("Nescafe classic 200g"), offers).exact

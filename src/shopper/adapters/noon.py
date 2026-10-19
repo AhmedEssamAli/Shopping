@@ -5,9 +5,11 @@ Verified from a capture on the home PC (2026-10-18):
   sale_price, pdp_url and is_buyable;
 - add-to-cart is ``POST /_vs/nc/mp-noon-api-cart/cart/item/<offer_code>/<qty>?showCart``
   with body ``{}``.
-Not yet verified: which request the search page makes. The adapter opens the search
-page and keeps any catalogue response that carries ``hits``, so it does not depend on
-the endpoint's path.
+- (2026-10-19, home-PC dump) the search page renders results into the page, not via a
+  JSON call: each tile is ``[data-qa=plp-product-box]`` with ``plp-product-box-name``
+  (full title in ``title``), ``plp-product-box-price`` and a ``/p/?o=<offer_code>`` link.
+  Sponsored tiles (``widget_AdMultiProduct``) are skipped. JSON responses and embedded
+  data are still read as a fallback.
 """
 from __future__ import annotations
 
@@ -24,6 +26,16 @@ from ..models import Offer
 from .base import Adapter
 
 BASE = "https://www.noon.com/egypt-en"
+TILES_JS = """() => [...document.querySelectorAll('[data-qa="plp-product-box"]')].map(el => {
+    const a = el.querySelector('a[href*="/p/"]');
+    const nameEl = el.querySelector('[data-qa="plp-product-box-name"]');
+    const priceEl = el.querySelector('[data-qa="plp-product-box-price"]');
+    const now = priceEl && (priceEl.querySelector('[class*="sellingPrice"] strong, strong') || {}).textContent;
+    const was = priceEl && (priceEl.querySelector('[class*="oldPrice"]') || {}).textContent;
+    return {href: a ? a.getAttribute('href') : '', name: nameEl ? (nameEl.getAttribute('title') || nameEl.textContent) : '',
+            price: now || '', was: was || ''};
+  }).filter(x => x.href && x.name && x.price)"""
+
 CART_ADD_JS = """async ([code, qty]) => {
   const r = await fetch(`/_vs/nc/mp-noon-api-cart/cart/item/${code}/${qty}?showCart`, {
     method: 'POST', credentials: 'include', headers: {'content-type': 'application/json'}, body: '{}'});
@@ -41,6 +53,22 @@ def relevance(hits: list[dict], query: str) -> float:
     if not want or not hits:
         return 0.0
     return sum(any(has_word(w, tokens(h.get("name") or "")) for w in want) for h in hits) / len(hits)
+
+
+def tiles_to_hits(rows: list[dict]) -> list[dict]:
+    """Rendered tiles -> the same dict shape as the catalogue API's ``hits``."""
+    out = []
+    for r in rows:
+        m = re.match(r"/egypt-en(/[^?]*/p/)\?o=([A-Za-z0-9]+)", r["href"])
+        if not m:
+            continue
+        num = lambda t: float(re.sub(r"[^\d.]", "", t)) if re.search(r"\d", t or "") else None
+        now, was = num(r["price"]), num(r.get("was"))
+        sku = m.group(1).rstrip("/").split("/")[-2]
+        out.append({"offer_code": m.group(2), "sku": sku, "name": " ".join(r["name"].split()), "pdp_url": m.group(1),
+                    "price": was if was and now and was > now else now, "sale_price": now if was and now and was > now else None,
+                    "is_buyable": True})
+    return out
 
 
 def embedded_hits(html: str) -> list[dict]:
@@ -107,6 +135,9 @@ class NoonAdapter(Adapter):
         try:
             await page.goto(self.search_url(query), wait_until="domcontentloaded", timeout=45000)
             for _ in range(int(self.wait_s * 2)):
+                tiles = tiles_to_hits(await page.evaluate(TILES_JS))
+                if tiles:
+                    found.append(tiles)
                 if any(relevance(h, query) >= 0.3 for h in found):
                     break
                 await page.wait_for_timeout(500)

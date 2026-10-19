@@ -96,3 +96,43 @@ async def test_push_carts_reports_per_platform(tmp_path):
     lines = await core.push_carts(result)
     assert any(l.startswith("B: added: 2 ×") for l in lines)
     assert any(l.startswith("A: no cart push") for l in lines)
+
+
+async def test_talabat_backs_off_on_429_then_succeeds(tmp_path, monkeypatch):
+    import httpx
+    import shopper.adapters.talabat as tal
+
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) < 3:
+            return httpx.Response(429, headers={"Retry-After": "0"})
+        return httpx.Response(200, json={"pageProps": {"ok": True}})
+
+    a = talabat(tmp_path)
+    a._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    assert await a._get("menu.json") == {"ok": True} and len(calls) == 3
+    await a.close()
+
+
+async def test_failed_aisles_keep_old_prices_and_retry(tmp_path):
+    a = talabat(tmp_path)
+    old_item = {"title": "Old Rice 1kg", "slug": "r", "price": 50, "originalPrice": 50, "sku": "9", "stockAmount": 3}
+    a.cache_path.write_text(json.dumps(snap([old_item])), encoding="utf-8")
+    menu = {"initialState": {"groceryStore": {"deliveryFee": 0}, "categories": [
+        {"slug": "milk", "subCategories": [{"slug": "ok", "count": 1}]},
+        {"slug": "rice", "subCategories": [{"slug": "broken", "count": 1}]}]}}
+
+    async def fake_get(route, **kw):
+        if route == "menu.json":
+            return menu
+        if kw["subCategorySlug"] == "broken":
+            raise RuntimeError("429")
+        return {"initialState": {"itemsData": {"pageCount": 1, "items": [
+            {"title": "New Milk 1L", "slug": "m", "price": 40, "originalPrice": 40, "sku": "1", "stockAmount": 2}]}}}
+
+    a._get = fake_get
+    s = await a.refresh()
+    assert s["failed"] == 1 and {i["sku"] for i in s["items"]} == {"1", "9"}
+    assert not a._is_fresh(s)  # incomplete -> retried later

@@ -26,13 +26,25 @@ log = logging.getLogger(__name__)
 DATA = "https://www.talabat.com/_next/data/manifests"
 SITE = "https://www.talabat.com/egypt/grocery"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36"
+# talabat answers 429 when several catalogues download at once (seen on the home PC,
+# 2026-10-19). So: one shop at a time, 2 requests in flight, a gap after each, and
+# back off on 429 / 5xx.
+REQUEST_GAP_S = 0.3
+RETRIES = 6
+_locks: dict[int, asyncio.Lock] = {}
+
+
+def _download_lock() -> asyncio.Lock:
+    """One catalogue download at a time across all talabat shops (per event loop)."""
+    loop = asyncio.get_running_loop()
+    return _locks.setdefault(id(loop), asyncio.Lock())
 
 
 class TalabatShopAdapter(Adapter):
     needs_browser = False
 
     def __init__(self, name: str, label: str, area_id: int, branch_id: int, branch_slug: str, cache_dir: Path,
-                 max_age_hours: float = 24, concurrency: int = 3, skip_categories: tuple[str, ...] = ()):
+                 max_age_hours: float = 24, concurrency: int = 2, skip_categories: tuple[str, ...] = ()):
         self.name, self.label = name, label
         self.area_id, self.branch_id, self.branch_slug = area_id, branch_id, branch_slug
         self.cache_path = cache_dir / f"talabat_{branch_id}.json"
@@ -56,9 +68,23 @@ class TalabatShopAdapter(Adapter):
         return self._client
 
     async def _get(self, route: str, **extra) -> dict:
-        r = await self._http().get(f"{DATA}/{route}", params=self._params(**extra))
-        r.raise_for_status()
-        return r.json()["pageProps"]
+        for attempt in range(RETRIES):
+            try:
+                r = await self._http().get(f"{DATA}/{route}", params=self._params(**extra))
+            except httpx.TransportError:
+                if attempt == RETRIES - 1:
+                    raise
+                await asyncio.sleep(2 * 2 ** attempt)
+                continue
+            if r.status_code == 429 or r.status_code >= 500:
+                if attempt == RETRIES - 1:
+                    r.raise_for_status()
+                wait = r.headers.get("Retry-After", "")
+                await asyncio.sleep(float(wait) if wait.isdigit() else min(60.0, 3 * 2 ** attempt))
+                continue
+            r.raise_for_status()
+            return r.json()["pageProps"]
+        raise RuntimeError("unreachable")
 
     @staticmethod
     def parse_menu(props: dict) -> tuple[dict, list[tuple[str, str, int]]]:
@@ -76,15 +102,20 @@ class TalabatShopAdapter(Adapter):
 
     async def refresh(self) -> dict:
         """Download the whole branch catalogue and save it to the cache file."""
+        async with _download_lock():
+            return await self._refresh()
+
+    async def _refresh(self) -> dict:
         store, subs = self.parse_menu(await self._get("menu.json"))
         sem = asyncio.Semaphore(self.concurrency)
         items: dict[str, dict] = {}
+        failed: list[str] = []
 
         async def page(cat: str, sub: str, n: int) -> int:
             async with sem:
                 got, pages = self.parse_items(await self._get("grocery-items.json", categorySlug=cat,
                                                               subCategorySlug=sub, page=n))
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(REQUEST_GAP_S)
             for it in got:
                 items.setdefault(str(it["sku"]), it)
             return pages
@@ -94,17 +125,28 @@ class TalabatShopAdapter(Adapter):
                 pages = await page(cat, sub, 1)
                 await asyncio.gather(*(page(cat, sub, n) for n in range(2, pages + 1)))
             except Exception as e:  # one broken aisle must not lose the rest
-                log.warning("talabat %s/%s failed: %s", cat, sub, e)
+                failed.append(f"{cat}/{sub}")
+                log.debug("talabat %s %s/%s failed: %s", self.label, cat, sub, e)
 
         await asyncio.gather(*(sub_all(c, s) for c, s, _ in subs if c not in self.skip))
-        snap = {"fetched_at": now_utc().isoformat(), "store": store, "items": list(items.values())}
+        if failed:
+            old = self._snapshot or (json.loads(self.cache_path.read_text(encoding="utf-8"))
+                                     if self.cache_path.exists() else None)
+            for it in (old or {}).get("items", []):  # keep last known prices for aisles that failed
+                items.setdefault(str(it["sku"]), it)
+            log.warning("%s: %d of %d aisles failed this time (talabat rate limit?); kept older prices "
+                        "for those and will retry later.", self.label, len(failed), len(subs))
+        snap = {"fetched_at": now_utc().isoformat(), "store": store, "items": list(items.values()),
+                "failed": len(failed)}
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self.cache_path.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
-        log.info("talabat snapshot: %d items", len(items))
+        log.info("%s snapshot: %d items", self.label, len(items))
         return snap
 
     def _is_fresh(self, snap: dict | None) -> bool:
-        return bool(snap) and now_utc() - datetime.fromisoformat(snap["fetched_at"]) < self.max_age
+        """Fresh = recent and complete. A snapshot with failed aisles is retried (in the background)."""
+        return (bool(snap) and not snap.get("failed")
+                and now_utc() - datetime.fromisoformat(snap["fetched_at"]) < self.max_age)
 
     async def snapshot(self) -> dict:
         """The cached catalogue. A stale copy is served while a new one downloads in the background;
@@ -113,6 +155,11 @@ class TalabatShopAdapter(Adapter):
             if self._snapshot is None and self.cache_path.exists():
                 self._snapshot = json.loads(self.cache_path.read_text(encoding="utf-8"))
             if self._snapshot is None:
+                if _download_lock().locked():  # another shop is downloading: queue this one, answer later
+                    if not (self._bg and not self._bg.done()):
+                        self._bg = asyncio.create_task(self._refresh_bg())
+                    raise RuntimeError(f"{self.label}: catalogue still downloading (first run). "
+                                       "Try again in a few minutes, or run `shopper refresh talabat` once.")
                 self._snapshot = await self.refresh()
             elif not self._is_fresh(self._snapshot) and not (self._bg and not self._bg.done()):
                 self._bg = asyncio.create_task(self._refresh_bg())

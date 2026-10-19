@@ -83,3 +83,11 @@ def test_value_tip_ignores_variants_and_small_savings():
     big = offer("Juhayna - Milk Skimmed - 1.5l", 80)  # 53.3/L, only 3% cheaper
     chosen = best_match(req, [single, lactose, big])
     assert value_tip(req, chosen, [single, lactose, big]) is None
+
+
+def test_value_tip_ignores_tiny_packs():
+    req = ItemRequest("basmati rice 5kg")
+    bag = offer("Shahy Basmati Rice - 5 kg", 760)
+    tiny = offer("Basmati Rice 250g", 17)  # 68/kg but 20 packs
+    chosen = best_match(req, [bag, tiny])
+    assert chosen.offer is bag and value_tip(req, chosen, [bag, tiny]) is None
