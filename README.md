@@ -52,6 +52,16 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
    - **Tailscale** (needed only for the "Full table" link). Install it on the PC and on the phone, signed in with the same account. On the PC, run `tailscale serve --bg 8765`, then set `WEB_BASE_URL` to the `https://<pc>.<tailnet>.ts.net` address it prints. Keep `WEB_HOST=127.0.0.1`: Tailscale forwards to it, so nothing is exposed to the internet.
    - Start `shopper serve` again. Keep the PC awake while you shop.
 
+## Install as a phone app
+
+The web page installs as an app on your phone's home screen. It opens full screen, with its own icon. The PC still does the work, so it must be on and running `shopper serve`. When the PC is off, the app shows "shopper is offline" instead of a browser error.
+
+1. Finish the Tailscale step above, so the page has an `https://<pc>.<tailnet>.ts.net` address. An app installs only over https.
+2. On the phone, open the "Full table" link from any bot reply, or `WEB_BASE_URL/?t=<WEB_TOKEN>`.
+3. Android (Chrome): menu ⋮ → **Install app** (or **Add to Home screen**). iPhone (Safari): Share → **Add to Home Screen**.
+
+In the app you paste a list, see the comparison, and press **Add the best plan to my carts** (noon and Amazon). The other platforms keep their product links.
+
 ## Use
 
 Telegram:
@@ -111,8 +121,8 @@ src/shopper/
   browser.py       persistent profile, login, capture
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
-  bot.py · web.py · cli.py · store.py (SQLite price history)
-tests/             89 tests; Magento fixtures are real responses captured 2026-10-18
+  bot.py · web.py · pwa.py (phone app) · cli.py · store.py (SQLite price history)
+tests/             90 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

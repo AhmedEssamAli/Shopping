@@ -111,3 +111,34 @@ def test_talabat_shops_expand_to_platforms():
     assert "talabat" not in plats and mart.label == "talabat Mart" and mart.status == "live"
     assert mart.options["area_id"] == 8192 and mart.options["slug"].startswith("talabat-mart")
     assert mart.fees.min_order == 40 and "talabat_743103" in plats
+
+
+class Pushy(Fake):
+    supports_cart_push = True
+
+    async def add_to_cart(self, lines):
+        return [f"added: {q} × {o.name}" for o, q in lines]
+
+
+def test_web_is_an_installable_app_with_cart_button(tmp_path):
+    s = settings(tmp_path)
+    s.web_token = "secret"
+    core = App(s)
+    core.adapters = {"a": Pushy("a", [("Juhayna Full Cream Milk 1L", 60)])}
+    client = TestClient(create_app(core))
+    home = client.get("/?t=secret").text
+    assert "/manifest.webmanifest?t=secret" in home and "serviceWorker" in home
+    assert client.get("/manifest.webmanifest").status_code == 404  # carries the token, so it is guarded
+    m = client.get("/manifest.webmanifest?t=secret").json()
+    assert m["start_url"] == "/?t=secret" and m["display"] == "standalone" and len(m["icons"]) == 2
+    png = client.get("/icon-512.png")
+    assert png.headers["content-type"] == "image/png" and png.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert "offline" in client.get("/sw.js").text and client.get("/offline").status_code == 200
+
+    page = client.post("/compare?t=secret", data={"items": "Juhayna full cream milk 1L", "max_orders": 2},
+                       follow_redirects=True)
+    assert "Add the best plan to my carts (A)" in page.text
+    rid = page.url.path.split("/")[-1]
+    pushed = client.post(f"/r/{rid}/push?t=secret")
+    assert "added: 1 × Juhayna Full Cream Milk 1L" in pushed.text
+    assert client.post(f"/r/{rid}/push").status_code == 404

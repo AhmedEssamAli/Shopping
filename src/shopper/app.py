@@ -19,6 +19,7 @@ class App:
         self.browser = BrowserSession(self.settings) if needs_browser else None
         self.adapters = build_adapters(self.settings, self.browser)
         self.last_results: dict[int, CompareResult] = {}  # per Telegram chat, for /push
+        self.results: dict[str, CompareResult] = {}  # by result id, for the web page's cart button
 
     def result_url(self, rid: str) -> str:
         token = f"?t={self.settings.web_token}" if self.settings.web_token else ""
@@ -33,6 +34,9 @@ class App:
         result = await compare(requests, self.settings, self.adapters, max_orders, exact_only)
         self.store.record_offers(all_offers(result))
         rid = self.store.save_result(to_html(result, self.settings, self.adapters))
+        self.results[rid] = result
+        while len(self.results) > 50:  # memory only; older pages stay viewable, just without the button
+            self.results.pop(next(iter(self.results)))
         text = to_text(result, self.settings, self.adapters, self.result_url(rid))
         return result, text, rid
 
