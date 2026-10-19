@@ -174,3 +174,29 @@ async def cdp_info(cdp_url: str) -> dict | None:
         except Exception:
             tabs = "?"
     return {"browser": version.get("Browser", "?"), "tabs": tabs}
+
+
+async def safe_evaluate(page: Page, js: str, default):
+    """page.evaluate that survives the page navigating under us (noon redirects its search
+    page while it loads): wait for the new page and return ``default`` for this attempt."""
+    from playwright.async_api import Error as PlaywrightError
+
+    try:
+        return await page.evaluate(js)
+    except PlaywrightError as e:
+        if "context was destroyed" not in str(e) and "navigat" not in str(e):
+            raise
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except PlaywrightError:
+            pass
+        return default
+
+
+def dump_page(settings: Settings, platform: str, query: str, html: str, info: dict) -> Path:
+    """Save a page that gave no results, for diagnosis."""
+    out = settings.captures_dir / platform / f"failed-search-{datetime.now():%Y%m%d-%H%M%S}"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "page.html").write_text(html, encoding="utf-8")
+    (out / "info.json").write_text(json.dumps({"query": query, **info}, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out

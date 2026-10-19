@@ -16,11 +16,10 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from ..browser import BrowserSession
+from ..browser import BrowserSession, dump_page, safe_evaluate
 from ..matching import has_word, tokens
 from ..models import Offer
 from .base import Adapter
@@ -135,14 +134,17 @@ class NoonAdapter(Adapter):
         try:
             await page.goto(self.search_url(query), wait_until="domcontentloaded", timeout=45000)
             for _ in range(int(self.wait_s * 2)):
-                tiles = tiles_to_hits(await page.evaluate(TILES_JS))
+                tiles = tiles_to_hits(await safe_evaluate(page, TILES_JS, []))
                 if tiles:
                     found.append(tiles)
                 if any(relevance(h, query) >= 0.3 for h in found):
                     break
                 await page.wait_for_timeout(500)
             await asyncio.gather(*pending, return_exceptions=True)
-            html = await page.content()
+            try:
+                html = await page.content()
+            except Exception:  # page still navigating: the tiles already read are what we have
+                html = ""
         finally:
             await page.close()
         embedded = embedded_hits(html)
@@ -155,13 +157,8 @@ class NoonAdapter(Adapter):
         return self.parse(best)[:limit]
 
     def _dump(self, query: str, html: str, found: list[list[dict]]) -> Path:
-        out = self.session.settings.captures_dir / "noon" / f"failed-search-{datetime.now():%Y%m%d-%H%M%S}"
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "page.html").write_text(html, encoding="utf-8")
-        (out / "info.json").write_text(json.dumps({"query": query, "hit_sets": [len(h) for h in found],
-                                                   "names": [[x.get("name") for x in h[:5]] for h in found]},
-                                                  indent=2, ensure_ascii=False), encoding="utf-8")
-        return out
+        return dump_page(self.session.settings, self.name, query, html,
+                         {"hit_sets": [len(h) for h in found], "names": [[x.get("name") for x in h[:5]] for h in found]})
 
     def parse(self, hits: list[dict]) -> list[Offer]:
         out = []

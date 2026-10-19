@@ -13,14 +13,19 @@ from __future__ import annotations
 
 import re
 
-from ..browser import BrowserSession
+from ..browser import BrowserSession, dump_page, safe_evaluate
 from ..matching import has_word, tokens
 from ..models import Offer
 from .base import Adapter
 
 BASE = "https://instashop.com/en-eg/client"
 
-EXTRACT_JS = """() => [...document.querySelectorAll('app-product')].map(el => {
+EXTRACT_JS = """() => [...new Set([...document.querySelectorAll('.product-title')].map(t =>
+    // The tile is app-product on shop pages; search results may wrap tiles differently,
+    // so climb from each title to the nearest ancestor that also holds a price.
+    t.closest('app-product') || (() => { let e = t; for (let i = 0; i < 6 && e; i++) {
+      e = e.parentElement; if (e && e.querySelector('.price-txt')) return e; } return null; })()
+  ).filter(Boolean))].map(el => {
     const t = s => (el.querySelector(s)?.textContent || '').trim();
     const link = el.querySelector('a[href*="/product/"]');
     return {title: t('.product-title'), size: t('.product-packaging-string'),
@@ -57,9 +62,12 @@ class InstashopAdapter(Adapter):
             rows: list[dict] = []
             for _ in range(int(self.wait_s * 2)):  # wait until the tiles reflect the query
                 await page.wait_for_timeout(500)
-                rows = await page.evaluate(EXTRACT_JS)
+                rows = await safe_evaluate(page, EXTRACT_JS, [])
                 if any(any(has_word(w, tokens(r["title"])) for w in want) for r in rows):
                     break
+            if not rows:
+                dump = dump_page(self.session.settings, self.name, query, await page.content(), {"url": page.url})
+                raise RuntimeError(f"{self.label}: no products after searching. Saved the page to {dump} — send me that folder.")
         finally:
             await page.close()
         return self.parse(rows)[:limit]
