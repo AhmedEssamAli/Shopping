@@ -1,4 +1,5 @@
 """Browser flows against synthetic pages served in place of the real sites."""
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +8,8 @@ import pytest
 
 from shopper.adapters.amazon_eg import AmazonEgAdapter
 from shopper.adapters.instashop import InstashopAdapter
-from shopper.models import Offer
+from shopper.matching import best_match
+from shopper.models import ItemRequest, Offer
 
 CHROMIUM = os.environ.get("BROWSER_EXECUTABLE", "/opt/pw-browsers/chromium")
 pytestmark = pytest.mark.skipif(not Path(CHROMIUM).exists(), reason="needs a Chromium binary")
@@ -63,28 +65,21 @@ async def test_amazon_add_to_cart_presses_button_and_confirms_count(browser, tmp
 
 
 INSTASHOP_SHOP = """<html><body>
-<form class="search-form"><input type="text" formcontrolname="query"></form><div id="slot"></div><div id="tiles"></div>
+<form class="search-form"><input type="text" formcontrolname="query"></form><div id="popup"></div>
 <script>
-const box = document.querySelector('input');
-box.addEventListener('input', () => setTimeout(() => {
-  document.querySelector('#slot').innerHTML = box.value.length < 3 ? '' :
-    '<div class="results"><nb-list-item>Mahmoud Elfar</nb-list-item>'
-    + '<nb-list-item onclick="showTiles()">Nescafe Classic Instant Coffee</nb-list-item></div>';
-}, 200));
-// Enter only closes the list, as on the real site.
-document.querySelector('form').addEventListener('submit', e => { e.preventDefault(); document.querySelector('#slot').innerHTML = ''; });
-function showTiles() {
-  document.querySelector('#slot').innerHTML = '';
-  document.querySelector('#tiles').innerHTML = '<app-product><a href="/en-eg/client/x/product/P1">'
-    + '<div class="product-title">Nescafe Classic Coffee</div><div class="product-packaging-string">200 gr</div>'
-    + '<div class="price-txt">EGP 255.00</div></a></app-product>';
-}
+// As on the real site: no type-ahead; Enter opens the results popup.
+document.querySelector('form').addEventListener('submit', e => { e.preventDefault();
+  setTimeout(() => { document.querySelector('#popup').innerHTML = window.POPUP; }, 300); });
 </script></body></html>"""
 
 
-async def test_instashop_search_opens_matching_suggestion(browser, tmp_path):
-    ctx = await serve(browser, {"https://instashop.com/en-eg/client/mahmoud-elfar-mivida": INSTASHOP_SHOP})
+async def test_instashop_search_reads_results_popup(browser, tmp_path):
+    popup = (Path(__file__).parent / "fixtures" / "instashop_search_popup.html").read_text(encoding="utf-8")
+    shop = INSTASHOP_SHOP.replace("<script>", "<script>window.POPUP = " + json.dumps(popup) + ";", 1)
+    ctx = await serve(browser, {"https://instashop.com/en-eg/client/mahmoud-elfar-mivida": shop})
     a = InstashopAdapter("instashop_x", "ElFar", "mahmoud-elfar-mivida", FakeSession(ctx, tmp_path), wait_s=4)
     offers = await a.search("Nescafe classic")
-    assert [(o.name, o.price) for o in offers] == [("Nescafe Classic Coffee - 200 gr", 255.0)]
-    assert offers[0].url.endswith("/product/P1")
+    assert ("Nescafé Classic Instant Coffee - 190 gr", 317.95) in [(o.name, o.price) for o in offers]
+    assert len(offers) == 4 and all(o.url.endswith("/mahmoud-elfar-mivida") for o in offers)
+    jar = best_match(ItemRequest("Nescafe classic 190g"), offers)
+    assert jar.exact and jar.offer.price == 317.95
