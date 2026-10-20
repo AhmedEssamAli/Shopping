@@ -53,7 +53,6 @@ class TalabatShopAdapter(Adapter):
         self.skip = set(skip_categories)
         self.login_url = f"{SITE}/{branch_id}/{branch_slug}?aid={area_id}"
         self._snapshot: dict | None = None
-        self._lock = asyncio.Lock()
         self._bg: asyncio.Task | None = None
         self._client: httpx.AsyncClient | None = None
 
@@ -148,22 +147,29 @@ class TalabatShopAdapter(Adapter):
         return (bool(snap) and not snap.get("failed")
                 and now_utc() - datetime.fromisoformat(snap["fetched_at"]) < self.max_age)
 
-    async def snapshot(self) -> dict:
-        """The cached catalogue. A stale copy is served while a new one downloads in the background;
-        only the very first call (no cache yet) waits for the download."""
-        async with self._lock:
-            if self._snapshot is None and self.cache_path.exists():
-                self._snapshot = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if self._snapshot is None:
-                if _download_lock().locked():  # another shop is downloading: queue this one, answer later
-                    if not (self._bg and not self._bg.done()):
-                        self._bg = asyncio.create_task(self._refresh_bg())
-                    raise RuntimeError(f"{self.label}: catalogue still downloading (first run). "
-                                       "Try again in a few minutes, or run `shopper refresh talabat` once.")
-                self._snapshot = await self.refresh()
-            elif not self._is_fresh(self._snapshot) and not (self._bg and not self._bg.done()):
+    async def snapshot(self, wait: bool = False) -> dict:
+        """The cached catalogue. A stale copy is served while a new one downloads in the background.
+
+        With no copy yet, the download starts in the background and a search is told to try
+        later, so one shop's first download (minutes for talabat Mart) never holds up a whole
+        comparison. ``wait=True`` (start-up warm-up) waits for it instead.
+        """
+        if self._snapshot is None and self.cache_path.exists():
+            self._snapshot = json.loads(self.cache_path.read_text(encoding="utf-8"))
+        downloading = self._bg is not None and not self._bg.done()
+        if self._snapshot is None:
+            if not downloading:
                 self._bg = asyncio.create_task(self._refresh_bg())
-            return self._snapshot
+            if wait:
+                await asyncio.shield(self._bg)
+                if self._snapshot is not None:
+                    return self._snapshot
+                raise RuntimeError(f"{self.label}: catalogue download failed; see the log, then retry.")
+            raise RuntimeError(f"{self.label}: catalogue still downloading (first run). "
+                               "Try again in a few minutes, or run `shopper refresh talabat` once.")
+        if not self._is_fresh(self._snapshot) and not downloading:
+            self._bg = asyncio.create_task(self._refresh_bg())
+        return self._snapshot
 
     async def _refresh_bg(self) -> None:
         try:

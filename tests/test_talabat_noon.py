@@ -136,3 +136,24 @@ async def test_failed_aisles_keep_old_prices_and_retry(tmp_path):
     s = await a.refresh()
     assert s["failed"] == 1 and {i["sku"] for i in s["items"]} == {"1", "9"}
     assert not a._is_fresh(s)  # incomplete -> retried later
+
+
+async def test_first_download_never_blocks_a_search(tmp_path):
+    import asyncio
+
+    import pytest
+    a = talabat(tmp_path)
+    gate = asyncio.Event()
+
+    async def slow_refresh():
+        await gate.wait()
+        return snap([{"title": "Milk 1L", "slug": "m", "price": 9, "originalPrice": 9, "sku": "2", "stockAmount": 5}])
+
+    a.refresh = slow_refresh
+    warm = asyncio.create_task(a.snapshot(wait=True))  # serve's start-up warm-up
+    await asyncio.sleep(0)
+    with pytest.raises(RuntimeError, match="still downloading"):
+        await asyncio.wait_for(a.search("milk"), 1)  # answers at once instead of waiting minutes
+    gate.set()
+    assert (await warm)["items"][0]["title"] == "Milk 1L"
+    assert [o.name for o in await a.search("milk")] == ["Milk 1L"]

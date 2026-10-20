@@ -238,7 +238,7 @@ async def _cmd_serve(args) -> None:
         for name, a in app.adapters.items():
             if name.startswith("talabat_") and s.platforms[name].enabled:
                 try:
-                    await a.snapshot()
+                    await a.snapshot(wait=True)
                 except Exception as e:
                     print(f"{a.label}: catalogue download failed: {e}")
     warm = asyncio.create_task(warm_talabat())  # so the first search is fast
