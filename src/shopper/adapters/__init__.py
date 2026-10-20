@@ -5,7 +5,8 @@ from ..config import Settings
 from .amazon_eg import AmazonEgAdapter
 from .base import Adapter, NotCalibrated
 from .instashop import InstashopAdapter
-from .magento import gourmet, seoudi, spinneys
+from .magento import gourmet, hyperone, seoudi, spinneys
+from .metro import MetroAdapter
 from .noon import NoonAdapter
 from .pending import HOME_URLS, PendingAdapter
 from .talabat import TalabatShopAdapter, list_shops
@@ -27,7 +28,7 @@ def talabat_shops(settings: Settings) -> dict[str, TalabatShopAdapter]:
 def build_adapters(settings: Settings, session: BrowserSession | None) -> dict[str, Adapter]:
     """Every platform in config/platforms.toml, live or not."""
     out: dict[str, Adapter] = {"gourmet": gourmet(), "seoudi": seoudi(), "spinneys": spinneys(),
-                               **talabat_shops(settings)}
+                               "hyperone": hyperone(), "metro_markets": MetroAdapter(), **talabat_shops(settings)}
     if session is not None:
         out["amazon_eg"] = AmazonEgAdapter(session)
         out["noon"] = NoonAdapter(session)

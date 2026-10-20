@@ -9,12 +9,16 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
 | Platform | Status | How |
 |---|---|---|
 | Gourmet Egypt, Seoudi Market, Spinneys Egypt | **live**, tested 2026-10-18 | public Magento GraphQL catalogue, no login |
+| **Metro Markets** (own site) | **live**, tested 2026-10-20 | its public search page; delivery to your address not verified |
+| HyperOne | built, **off by default** | public Magento catalogue; no New Cairo branch found, so check the app before you enable it |
 | **talabat grocery shops**: talabat Mart, Carrefour, Spinneys, Metro, Lulu, Zaher Dairy, The Grove, Zidan (79 shops deliver to Tagammoa 5) | **live**, tested 2026-10-18 | talabat's own data routes, no login; each shop's catalogue is saved daily and searched locally; delivery fee and minimum order come live from talabat |
 | noon | **search live on the home PC**, tested 2026-10-19; cart push rebuilt, not yet verified live | Shopping Chrome. Cart push presses Add to Cart on the product page; noon refused shopper's direct cart call (HTTP 403). On a failed search, shopper saves the page to `~/.shopper/captures/noon/failed-search-*`; send that folder |
 | Amazon.eg | **search and cart push live on the home PC**, tested 2026-10-19 | Shopping Chrome. Cart push opens each product and presses Add to Cart. Amazon's cart-link form did not add items on .eg, so shopper no longer shows it |
 | Instashop shops (Mahmoud ElFar by default) | **search live on the home PC**, tested 2026-10-19 | reads the shop page in Shopping Chrome. shopper types the query, presses Enter and reads the results popup (verified from your dump). The popup has no product links, so offers link to the shop page. The product tiles are verified from your capture. Instashop encrypts its API and requires reCAPTCHA, and shopper does not bypass either |
 | Carrefour direct site | not needed | Carrefour comes through talabat |
-| Breadfast, Rabbit | **pending** | Breadfast's website has only app-store links; Rabbit is app-first |
+| Breadfast, Rabbit | **app only** | their websites have no catalogue |
+
+Every other shop that was checked, Amazon Now and noon Minutes included, is in [docs/retailers.md](docs/retailers.md), with the next step for each.
 
 ## Why it runs at home, not in the cloud
 
@@ -52,6 +56,17 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
    - **Tailscale** (needed only for the "Full table" link). Install it on the PC and on the phone, signed in with the same account. On the PC, run `tailscale serve --bg 8765`, then set `WEB_BASE_URL` to the `https://<pc>.<tailnet>.ts.net` address it prints. Keep `WEB_HOST=127.0.0.1`: Tailscale forwards to it, so nothing is exposed to the internet.
    - Start `shopper serve` again. Keep the PC awake while you shop.
 
+## The home page
+
+Open `WEB_BASE_URL/?t=<WEB_TOKEN>`. It shows:
+- A box to type or paste a list, with **Compare prices** and **Add to the list**. Options (exact matches only, most orders) fold away.
+- **Products you chose before** as chips: tap one to put that line in the box.
+- **The household list**, with Remove, **Compare the list** and **Clear the list**.
+- **Recent comparisons**, each with its item count and best total. A page from before the last restart opens as history, without buttons.
+- **Shops**, grouped by how shopper reaches them.
+
+If `WEB_TOKEN` is empty, `shopper serve` creates an access key, saves it in `~/.shopper/web_token`, and prints it, so the page is never open to anyone on your network.
+
 ## Install as a phone app
 
 The web page installs as an app on your phone's home screen. It opens full screen, with its own icon. The PC still does the work, so it must be on and running `shopper serve`. When the PC is off, the app shows "shopper is offline" instead of a browser error.
@@ -69,10 +84,11 @@ The page reads like a shop shelf. Each item shows one shelf label per shop, chea
 ## Use
 
 Telegram:
-- Send one line to compare that item now: `2 Juhayna full cream milk 1L`.
-- Send several lines to compare that basket now.
-- `/add <lines>`, `/list`, `/remove 3` and `/clear` keep a running list. `/compare` (or `/compare exact`) compares the saved list.
-- `/watch Nescafe classic 200g @ 250` watches an item. The bot re-prices it every `WATCH_INTERVAL_HOURS` (default 6). It alerts you when the cheapest exact match reaches your price, or drops by more than 1% when no target is set. `/watches` lists them and `/unwatch 3` removes one.
+- Send one line to compare that item now: `2 Juhayna full cream milk 1L`. Send several lines to compare a basket.
+- The keyboard under the text box has **Compare my list**, **My list**, **My watches** and **How to use**. The "/" button lists every command.
+- Under each result: **Add the plan to my carts** (shown once the plan is final; it works once per result), **Save as my list**, and **Open the full table** (when `WEB_BASE_URL` is your https Tailscale address).
+- **The household list** is shared by everyone in `TELEGRAM_ALLOWED_CHAT_IDS` and by the web page. `/add <lines>` adds; under `/list`, **Remove**, **Compare the list** and **Clear the list** are buttons.
+- `/watch Nescafe classic 200g @ 250` watches an item. The bot re-prices it every `WATCH_INTERVAL_HOURS` (default 6). With a target, it alerts you when the cheapest exact match reaches it; without one, when the price drops by more than 1%. Alerts carry **Open the product** and **Stop watching** buttons; `/watches` lists them with **Stop** buttons.
 - Each comparison also lists **better-value packs**: the same product in another size that costs at least 5% less per litre, kg or piece. Example: a 6 × 1 L pack against single litres.
 - `/push` adds the last best plan to your carts where the platform allows it (noon and Amazon today); other platforms get links.
 - Arabic and free text work when `ANTHROPIC_API_KEY` is set. Claude turns `2 لبن جهينة كامل الدسم لتر` into `2 × Juhayna full cream milk 1L`. Without the key, a local parser reads one item per line.
@@ -123,15 +139,16 @@ The buttons work on comparisons made since `shopper serve` last started. Older p
 
 Run this on the home PC:
 ```
-shopper capture talabat
+shopper capture carrefour
 ```
-A window opens. Search for one item, open a product, and add it to the cart, then press Enter. Every JSON response and the page HTML are saved to `~/.shopper/captures/talabat/<time>/`. These show the platform's own search and cart API, and an adapter can then be written against real data, like `src/shopper/adapters/magento.py`. Captures can contain session tokens: check before you share one, and delete the cookies/authorization values first.
+Use any name from `shopper platforms`. A window opens. Search for one item, open a product, and add it to the cart, then press Enter. Every JSON response and the page HTML are saved to `~/.shopper/captures/<platform>/<time>/`. These show the platform's own search and cart API, and an adapter can then be written against real data, like `src/shopper/adapters/magento.py`. Captures can contain session tokens: check before you share one, and delete the cookies/authorization values first.
 
 ## Layout
 
 ```
 src/shopper/
-  adapters/        magento.py (Gourmet, Seoudi, Spinneys) · talabat.py (any talabat shop) · noon.py · amazon_eg.py · pending.py
+  adapters/        magento.py (Gourmet, Seoudi, Spinneys, HyperOne) · metro.py · talabat.py (any talabat shop)
+                   noon.py · amazon_eg.py · instashop.py · pending.py
   units.py         size and pack parsing
   matching.py      exact / close match rules
   memory.py        your picks, rejects and avoided words
@@ -142,7 +159,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · pwa.py (phone app) · cli.py · store.py (SQLite price history)
-tests/             97 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             115 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

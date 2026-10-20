@@ -5,7 +5,9 @@
 # status:
 #   live     - adapter works without a browser (public catalogue API)
 #   browser  - adapter needs the signed-in browser profile on the home PC
-#   pending  - adapter not calibrated yet; run `shopper capture <platform> "<item>"` on the home PC
+#   pending  - adapter not calibrated yet; run `shopper capture <platform>` on the home PC
+#
+# Which shops exist, and how each could be added: docs/retailers.md
 
 [gourmet]
 label = "Gourmet Egypt"
@@ -29,6 +31,28 @@ verified = false
 label = "Spinneys Egypt"
 status = "live"
 enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[metro_markets]
+# Metro's own site (it is also on talabat). Its Store Locator lists Fifth Settlement;
+# delivery to your address and the fee are not verified. Set enabled = false to drop it.
+label = "Metro Markets"
+status = "live"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[hyperone]
+# Public catalogue works, but no branch in New Cairo was found. Check the HyperOne app
+# with your address first, then set enabled = true.
+label = "HyperOne"
+status = "live"
+enabled = false
 delivery_fee = 0
 service_fee_pct = 0
 min_order = 0

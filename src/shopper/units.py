@@ -12,7 +12,8 @@ _UNIT_FACTORS = {
     "l": ("ml", 1000), "lt": ("ml", 1000), "ltr": ("ml", 1000),
     "liter": ("ml", 1000), "litre": ("ml", 1000), "liters": ("ml", 1000), "litres": ("ml", 1000),
     "g": ("g", 1), "gm": ("g", 1), "gr": ("g", 1), "gram": ("g", 1), "grams": ("g", 1),
-    "kg": ("g", 1000), "kilo": ("g", 1000), "kilogram": ("g", 1000),
+    "kg": ("g", 1000), "kgs": ("g", 1000), "kilo": ("g", 1000), "kilos": ("g", 1000), "kilogram": ("g", 1000),
+    "k": ("g", 1000),  # "Basmati Rice - 5K" on shelf names
     "pcs": ("pcs", 1), "pc": ("pcs", 1), "piece": ("pcs", 1), "pieces": ("pcs", 1),
     "sachets": ("pcs", 1), "rolls": ("pcs", 1), "eggs": ("pcs", 1),
 }

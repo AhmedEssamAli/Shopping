@@ -35,3 +35,8 @@ def test_strip_sizes():
 def test_label():
     assert Size(1000, "ml", 6).label() == "6x1L"
     assert Size(500, "g").label() == "500g"
+
+
+def test_shelf_k_means_kilo():
+    assert parse_size("Daria Basmati Rice - 5K") == Size(5000, "g")
+    assert parse_size("Dettol 1,000 ml") == Size(1000, "ml")

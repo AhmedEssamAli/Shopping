@@ -91,6 +91,12 @@ def seoudi() -> MagentoAdapter:
                           "https://seoudisupermarket.com/en", login_url="https://seoudisupermarket.com/en")
 
 
+def hyperone() -> MagentoAdapter:
+    # Public Magento GraphQL verified 2026-10-20; product pages are /en/product/<url_key>.
+    return MagentoAdapter("hyperone", "HyperOne", "https://mcprod.hyperone.com.eg/graphql",
+                          "https://www.hyperone.com.eg/en/product", login_url="https://www.hyperone.com.eg/en")
+
+
 def spinneys() -> MagentoAdapter:
     return MagentoAdapter("spinneys", "Spinneys Egypt", "https://mcprod.spinneys-egypt.com/graphql",
                           "https://spinneys-egypt.com/en", login_url="https://spinneys-egypt.com/en")
