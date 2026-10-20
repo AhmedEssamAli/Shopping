@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import struct
+from urllib.parse import quote
 import zlib
 from functools import lru_cache
 
@@ -40,7 +41,7 @@ def manifest(token: str | None) -> str:
 
 
 def head_tags(token: str | None) -> str:
-    q = f"?t={token}" if token else ""
+    q = f"?t={quote(token)}" if token else ""
     return (f"<link rel=manifest href='/manifest.webmanifest{q}'><meta name=theme-color content='{THEME}'>"
             "<link rel=apple-touch-icon href='/icon-192.png'><meta name=apple-mobile-web-app-capable content=yes>"
             "<meta name=apple-mobile-web-app-title content=shopper>"

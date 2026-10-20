@@ -47,6 +47,9 @@ class Size:
 
 
 def _to_float(s: str) -> float:
+    """"1,5" is 1.5 (decimal comma), "1,000" is 1000 (thousands)."""
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+", s):
+        return float(s.replace(",", ""))
     return float(s.replace(",", "."))
 
 

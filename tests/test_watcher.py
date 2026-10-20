@@ -41,3 +41,7 @@ async def test_check_watches_updates_and_alerts(tmp_path):
     alerts = await check_watches(core)
     assert alerts and alerts[0][0] == 42 and "TARGET REACHED" in alerts[0][1]
     assert core.store.delete_watch(42, wid) and core.store.list_watches() == []
+
+
+def test_target_watch_alerts_only_on_reaching_target():
+    assert alert_for(w(target=40, last=60), m(55), "A") is None  # dropped, but target not reached

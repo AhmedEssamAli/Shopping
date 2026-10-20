@@ -117,8 +117,9 @@ def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adap
         if memory:
             r.recall = memory.recall(r.request)
         r.matches = {p: match_on(r.request, p, offers, r.recall) for p, offers in r.candidates.items()}
+        rejected = r.recall.rejected if r.recall else set()
         r.cards = product_cards(r.request, [o for offers in r.candidates.values() for o in offers],
-                                r.recall.avoid if r.recall else frozenset())
+                                r.recall.avoid if r.recall else frozenset(), rejected)
     matches = {
         a.name: {i: r.matches[a.name] for i, r in enumerate(result.items) if r.matches.get(a.name)} for a in active
     }
@@ -131,7 +132,8 @@ def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adap
                                 result.exact_only)
     result.unverified_fees = [a.name for a in active if not (a.name in fees and fees[a.name].verified)]
     for i, r in enumerate(result.items):
-        pool = [o for offers in r.candidates.values() for o in offers]
+        rejected = r.recall.rejected if r.recall else set()
+        pool = [o for offers in r.candidates.values() for o in offers if (o.platform, offer_id(o)) not in rejected]
         r.tip = value_tip(r.request, result.proposals[0].assignments.get(i), pool) if result.proposals else None
     return result
 

@@ -1,9 +1,11 @@
 """Wires settings, store, browser profile and adapters together for the CLI, bot and web."""
 from __future__ import annotations
 
+import asyncio
+
 from .adapters import build_adapters
 from .browser import BrowserSession
-from .memory import Memory
+from .memory import Memory, offer_key
 from .config import Settings, load_settings
 from .models import ItemRequest
 from .parsing import parse_list
@@ -25,7 +27,8 @@ class App:
         self.browser = BrowserSession(self.settings) if needs_browser else None
         self.adapters = build_adapters(self.settings, self.browser)
         self.last_results: dict[int, CompareResult] = {}  # per Telegram chat, for /push
-        self.results: dict[str, CompareResult] = {}  # by result id, for the web page's cart button
+        self.results: dict[str, CompareResult] = {}
+        self.push_log: dict[str, list[str]] = {}  # result id -> what the web cart push reported  # by result id, for the web page's cart button
 
     def result_url(self, rid: str) -> str:
         token = f"?t={self.settings.web_token}" if self.settings.web_token else ""
@@ -33,6 +36,15 @@ class App:
 
     def parse(self, text: str) -> list[ItemRequest]:
         return parse_list(text, self.settings.anthropic_key)
+
+    async def parse_async(self, text: str) -> list[ItemRequest]:
+        """The Claude call blocks; run it off the event loop so the bot and the page stay responsive."""
+        return await asyncio.to_thread(self.parse, text)
+
+    def pushable(self, result: CompareResult) -> list[str]:
+        """Shops in the best plan whose carts shopper can fill."""
+        best = result.best
+        return [p for p in (best.platforms if best else []) if p in self.adapters and self.adapters[p].supports_cart_push]
 
     async def run(self, requests: list[ItemRequest], max_orders: int | None = None, exact_only: bool = False
                   ) -> tuple[CompareResult, str, str]:
@@ -46,8 +58,11 @@ class App:
             self.results.pop(next(iter(self.results)))
         return result, self.text(rid), rid
 
-    def text(self, rid: str) -> str:
-        return to_text(self.results[rid], self.settings, self.adapters, self.result_url(rid))
+    def text(self, rid: str, chat: bool = False) -> str:
+        url = self.result_url(rid)
+        if chat and not url.startswith("https://"):
+            url = None  # http://127.0.0.1 does not open on the phone; Telegram gets a button instead
+        return to_text(self.results[rid], self.settings, self.adapters, url, chat=chat)
 
     def _render(self, rid: str) -> None:
         result = self.results[rid]
@@ -69,36 +84,53 @@ class App:
         self.store.clear_list(HOUSEHOLD)
         self.store.add_to_list(HOUSEHOLD, items)
 
-    def remove_from_list(self, index: int) -> bool:
+    def remove_from_list(self, index: int, expect: str | None = None) -> bool:
+        """``expect``: the line's text, so a stale button cannot remove a line someone else moved."""
+        items = self.list_items()
+        if expect is not None and not (0 <= index < len(items) and items[index].query == expect):
+            return False
         return self.store.remove_from_list(HOUSEHOLD, index)
 
     def clear_list(self) -> None:
         self.store.clear_list(HOUSEHOLD)
 
-    def feedback(self, rid: str, action: str, item: int, card: int | None = None, platform: str | None = None) -> bool:
-        """Apply a pick / reject / forget from the comparison page, then re-match the offers
-        already fetched (no new search) and re-render the page. False if the result is gone."""
+    def feedback(self, rid: str, action: str, item: int, card: str | None = None, platform: str | None = None,
+                 offer: str | None = None) -> str:
+        """Apply a pick / reject / forget, then re-match the offers already fetched (no new
+        search) and re-render the page.
+
+        Buttons name a card key or an offer key, never a position, so a double tap or a
+        stale page cannot choose or reject a different product. Returns "ok", "stale"
+        (nothing matched; nothing changed) or "gone" (the result is no longer in memory).
+        """
         result = self.results.get(rid)
-        if result is None or not 0 <= item < len(result.items):
-            return False
+        if result is None:
+            return "gone"
+        if not 0 <= item < len(result.items):
+            return "stale"
         r = result.items[item]
-        if action == "pick" and card is not None and 0 <= card < len(r.cards):
-            self.memory.pick(r.request, r.cards[card], r.cards)
-        elif action == "reject" and platform and r.matches.get(platform):
-            self.memory.reject(r.request, r.matches[platform].offer)
-        elif action == "forget":
+        m = r.matches.get(platform) if platform else None
+        chosen = next((c for c in r.cards if c.key == card), None)
+        if action == "pick" and chosen:
+            self.memory.pick(r.request, chosen, r.cards)
+        elif action == "reject" and m and not m.pinned and offer_key(m.offer) == offer:
+            self.memory.reject(r.request, m.offer)
+        elif action == "forget" and r.pinned:
             self.memory.forget(r.request)
         else:
-            return False
+            return "stale"
         assemble(result, self.settings, self.adapters, self.memory)
         self._render(rid)
-        return True
+        return "ok"
 
     async def push_carts(self, result: CompareResult) -> list[str]:
         """Put the best plan into your real carts where the platform allows it; otherwise say how."""
         best = result.best
         if not best:
             return ["Nothing to push: no plan."]
+        pending = [r.request.query for r in result.items if r.needs_pick]
+        if pending:
+            return ["Not added: choose your product first for " + "; ".join(pending) + "."]
         out = []
         for platform in best.platforms:
             a = self.adapters.get(platform)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import NamedTuple
 
 from .models import ItemRequest, Match
 from .service import compare
@@ -10,6 +11,13 @@ from .store import Watch
 
 log = logging.getLogger(__name__)
 DROP_ALERT_PCT = 1.0
+class Alert(NamedTuple):
+    chat_id: int
+    text: str
+    url: str
+    watch_id: int
+
+
 _TARGET = re.compile(r"^(.*?)\s*@\s*(\d+(?:[.,]\d+)?)\s*$")
 
 
@@ -34,13 +42,16 @@ def alert_for(w: Watch, m: Match, label: str) -> str | None:
     where = f"{label}: {m.offer.name} @ EGP {price:,.2f}\n{m.offer.url}"
     if w.target is not None and price <= w.target and (w.last_price is None or w.last_price > w.target):
         return f"TARGET REACHED for “{w.query}” (≤ {w.target:,.2f})\n{where}"
-    if w.last_price is not None and price < w.last_price * (1 - DROP_ALERT_PCT / 100):
+    # With a target you hear only when it is reached; without one, on every real drop.
+    if w.target is None and w.last_price is not None and price < w.last_price * (1 - DROP_ALERT_PCT / 100):
         return f"PRICE DROP for “{w.query}”: {w.last_price:,.2f} → {price:,.2f}\n{where}"
     return None
 
 
-async def check_watches(app, chat_id: int | None = None) -> list[tuple[int, str]]:
-    """Re-price every watch, store the new price, and return (chat_id, message) alerts."""
+async def check_watches(app, chat_id: int | None = None) -> list[Alert]:
+    """Re-price every watch, store the new price, and return the alerts to send."""
+    from .report import label as platform_label
+
     alerts = []
     for w in app.store.list_watches(chat_id):
         try:
@@ -50,9 +61,8 @@ async def check_watches(app, chat_id: int | None = None) -> list[tuple[int, str]
             continue
         if not m:
             continue
-        label = app.settings.platforms[m.offer.platform].label if m.offer.platform in app.settings.platforms else m.offer.platform
-        msg = alert_for(w, m, label)
+        msg = alert_for(w, m, platform_label(app.settings, m.offer.platform))
         app.store.update_watch(w.id, m.offer.price, m.offer.platform, m.offer.url)
         if msg:
-            alerts.append((w.chat_id, msg))
+            alerts.append(Alert(w.chat_id, msg, m.offer.url, w.id))
     return alerts

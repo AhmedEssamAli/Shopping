@@ -14,6 +14,7 @@ them is a direct answer, so storing it is exact from the first pick.
 from __future__ import annotations
 
 import sqlite3
+import zlib
 from dataclasses import dataclass, field
 
 from .matching import ACCEPT_SCORE, VARIANT_WORDS, score, tokens
@@ -24,6 +25,12 @@ from .models import ItemRequest, Offer, now_utc
 FORM_WORDS = {
     "jar", "pouch", "sachet", "sachets", "stick", "sticks", "refill", "tin", "can", "cans",
     "bottle", "bottles", "box", "bag", "carton", "tube", "cup", "cups", "glass", "spray",
+}
+# Words that name a different kind of the same thing ("basmati" vs "egyptian" rice). They
+# split cards, so a short line like "rice 5kg" asks which one, but never block a match.
+KIND_WORDS = {
+    "basmati", "jasmine", "egyptian", "brown", "white", "parboiled", "sella", "wholegrain", "wholemeal",
+    "multigrain", "decaf", "gold", "classic", "original", "extra", "virgin", "pure", "raw", "roasted",
 }
 AVOID_AFTER = 2  # rejections of a word, with no pick, before it blocks exact matches
 
@@ -44,12 +51,21 @@ def offer_id(o: Offer) -> str:
     return o.sku or o.name  # Instashop popup items carry no id
 
 
+def _short_hash(text: str) -> str:
+    return f"{zlib.crc32(text.encode()) & 0xFFFFFFFF:08x}"
+
+
+def offer_key(o: Offer) -> str:
+    """Short stable id for one listing, for buttons and forms (Telegram allows 64 bytes)."""
+    return _short_hash(f"{o.platform}|{offer_id(o)}")
+
+
 def attributes(request: ItemRequest, o: Offer) -> tuple[str, frozenset[str], frozenset[str]]:
-    """(size, pack words, variant words the line did not ask for): what tells products apart."""
+    """(size, pack words, variant and kind words the line did not ask for): what tells products apart."""
     words = set(tokens(o.name))
     asked = set(tokens(request.query))
     size = o.size.label() if o.size else ""
-    return size, frozenset(words & FORM_WORDS), frozenset((words & VARIANT_WORDS) - asked)
+    return size, frozenset(words & FORM_WORDS), frozenset((words & (VARIANT_WORDS | KIND_WORDS)) - asked)
 
 
 @dataclass
@@ -72,6 +88,11 @@ class ProductCard:
     def words(self) -> frozenset[str]:
         return self.forms | self.variants
 
+    @property
+    def key(self) -> str:
+        """Stable id: the same product gets the same key after cards are re-sorted."""
+        return _short_hash(f"{self.size}|{' '.join(sorted(self.forms))}|{' '.join(sorted(self.variants))}")
+
     def cheapest(self) -> Offer:
         return min(self.offers, key=lambda o: o.price)
 
@@ -83,11 +104,13 @@ class ProductCard:
 
 
 def product_cards(request: ItemRequest, offers: list[Offer], avoid: frozenset[str] = frozenset(),
-                  limit: int = 6) -> list[ProductCard]:
+                  rejected: set[tuple[str, str]] | frozenset = frozenset(), limit: int = 6) -> list[ProductCard]:
     """Group acceptable offers into distinct products, exact ones first, cheapest first.
-    Words you avoid still show, as non-exact cards."""
+    Words you avoid still show, as non-exact cards; listings you rejected do not show."""
     cards: dict[tuple, ProductCard] = {}
     for o in offers:
+        if (o.platform, offer_id(o)) in rejected:
+            continue
         m = score(request, o, avoid)
         if not o.in_stock or m.score < ACCEPT_SCORE:
             continue

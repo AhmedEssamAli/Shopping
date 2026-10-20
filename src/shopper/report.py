@@ -6,6 +6,7 @@ from html import escape
 from .adapters import Adapter
 from .config import Settings
 from .models import Proposal
+from .memory import offer_key
 from .service import CompareResult
 
 
@@ -51,6 +52,13 @@ def cart_links(result: CompareResult, prop: Proposal, adapters: dict[str, Adapte
     return out
 
 
+def _no_plan(result: CompareResult) -> str:
+    if any(m for r in result.items for m in r.matches.values()):
+        return ("No plan meets the shops' minimum orders. The prices are below; add items or allow more "
+                "orders to get a plan.")
+    return "No shop had an acceptable match for this list."
+
+
 def _plan_lines(result: CompareResult, prop: Proposal, settings: Settings) -> list[str]:
     lines = []
     for platform in prop.platforms:
@@ -60,23 +68,26 @@ def _plan_lines(result: CompareResult, prop: Proposal, settings: Settings) -> li
                 continue
             tag = "" if m.exact else " [close match]"
             if result.items[i].needs_pick:
-                tag += " [choose your product in the table]"
+                tag += " [choose your product]"
             lines.append(f"  • {m.request.qty} × {m.offer.name} @ {m.offer.price:,.2f}{tag}\n    {m.offer.url}")
     return lines
 
 
-def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapter], table_url: str | None = None) -> str:
+def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapter], table_url: str | None = None,
+            chat: bool = False) -> str:
+    """``chat``: for Telegram, where products are chosen with buttons under the message."""
     n = len(result.items)
     out = [f"{n} item{'s' if n != 1 else ''} · {settings.area_name} · searched {', '.join(label(settings, p) for p in result.platforms)}"]
     best = result.best
     if not best:
-        out.append("No platform had an acceptable match.")
+        out.append(_no_plan(result))
     else:
         names = " + ".join(label(settings, p) for p in best.platforms)
         out.append(f"\nBEST PLAN: {names} — {_egp(best.total)}")
         pending = [r.request.query for r in result.items if r.needs_pick]
         if pending:
-            out.append(f"Not final: several products fit {len(pending)} line(s). Choose yours in the Full table: "
+            where = "with the buttons below" if chat else "in the Full table"
+            out.append(f"Not final: several products fit {len(pending)} line(s). Choose yours {where}: "
                        + "; ".join(pending))
         out += _plan_lines(result, best, settings)
         for platform, link in cart_links(result, best, adapters).items():
@@ -246,7 +257,7 @@ def _cards_html(result: CompareResult, settings: Settings, i: int, base: str | N
         listings = "".join(f"<li>{escape(label(settings, p))}: {_link(o)}, {o.price:,.2f}</li>" for p, o in c.per_platform().items())
         tag = "" if c.exact else "<span class='warn small'>other size or wording</span>"
         cards.append(f"<div class=choice><h3>{escape(c.label)}</h3>{tag}<div>{_tag(best.price)} <span class='muted small'>{_unit(best)}</span></div>"
-                     f"<ul>{listings}</ul><div class=push>{_button(base and base + '/pick', q, 'This one', {'item': i, 'card': j}, 'pick')}</div></div>")
+                     f"<ul>{listings}</ul><div class=push>{_button(base and base + '/pick', q, 'This one', {'item': i, 'card': c.key}, 'pick')}</div></div>")
     return f"<div class=choices>{''.join(cards)}</div>"
 
 
@@ -263,7 +274,8 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
         flag = ("your pick" if m.pinned else "" if m.exact else "close match")
         was = f"was {o.regular_price:,.2f}" if o.on_deal else ""
         flags = ", ".join(x for x in (flag, was) if x)
-        no = "" if m.pinned else _button(base and base + "/reject", q, "not this", {"item": i, "platform": p})
+        no = "" if m.pinned else _button(base and base + "/reject", q, "not this",
+                                         {"item": i, "platform": p, "offer": offer_key(o)})
         labels.append(f"<li class='label {cls}'><div class=shop>{escape(label(settings, p))}</div>"
                       f"<div class=amount>{o.price:,.2f}</div><div class='muted small'>{_unit(o)}</div>{_link(o, 'product')}"
                       f"<div class='flag {'close' if not m.exact else ''}'>{escape(flags)}</div>{no}</li>")
@@ -294,7 +306,7 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
               f"{len(result.platforms)} shops searched, prices from {when}. Check the total in the app before you pay.</p>")
     pending = [r for r in result.items if r.needs_pick]
     plan = (_plan_html(result, result.best, settings, adapters) if result.best
-            else "<h2>No plan yet</h2><p class=muted>No shop had an acceptable match for this list.</p>")
+            else f"<h2>No plan yet</h2><p class=muted>{escape(_no_plan(result))}</p>")
     notice = (f"<p class=notice><b>Not final.</b> Several products fit {len(pending)} line{'s' if len(pending) != 1 else ''}. "
               "Choose yours below; shopper remembers it for next time.</p>") if pending else ""
     tips = [(r, tip_line(settings, r)) for r in result.items if r.tip]

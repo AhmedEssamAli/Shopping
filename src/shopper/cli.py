@@ -37,7 +37,8 @@ def _cmd_platforms(args) -> None:
 
 async def _cmd_login(args) -> None:
     app = App()
-    names = [n for n in app.adapters if n not in ("gourmet", "seoudi", "spinneys")] if args.platform == "all" else [args.platform]
+    # Only the browser platforms have a login; the catalogues and talabat need none.
+    names = [n for n, a in app.adapters.items() if a.needs_browser] if args.platform == "all" else [args.platform]
     for n in names:
         a = app.adapters.get(n)
         if not a:
@@ -50,7 +51,7 @@ async def _cmd_capture(args) -> None:
     app = App()
     a = app.adapters.get(args.platform)
     if not a:
-        sys.exit(f"Unknown platform: {args.platform}")
+        sys.exit(f"Unknown platform: {args.platform}. Choose one of: {', '.join(sorted(app.adapters))}")
     await capture(app.settings, args.platform, a.login_url)
     await app.close()
 
@@ -77,7 +78,11 @@ async def _compare(requests: list[ItemRequest], args) -> None:
 
 
 async def _cmd_search(args) -> None:
-    await _compare([ItemRequest(args.item, 1)], args)
+    # The same parser as the bot and the web page: "2 milk 1L" is 2 × milk, Arabic is translated.
+    from .parsing import parse_list
+
+    requests = parse_list(args.item, load_settings().anthropic_key)[:1] or [ItemRequest(args.item, 1)]
+    await _compare(requests, args)
 
 
 async def _cmd_basket(args) -> None:
@@ -118,7 +123,17 @@ async def _cmd_watch_check(args) -> None:
         alerts = await check_watches(app)
         for w in app.store.list_watches():
             print(f"#{w.id} chat {w.chat_id}: {w.query} -> {w.last_price} ({w.last_platform})")
-        print("\n".join(text for _, text in alerts) or "No alerts.")
+        print("\n".join(a.text for a in alerts) or "No alerts.")
+        if alerts and app.settings.telegram_token:
+            # This check saved the new prices, so the bot will not alert again: send them now.
+            from telegram import Bot
+
+            from .bot import alert_keyboard
+
+            async with Bot(app.settings.telegram_token) as bot:
+                for a in alerts:
+                    await bot.send_message(a.chat_id, a.text, disable_web_page_preview=True, reply_markup=alert_keyboard(a))
+            print(f"Sent {len(alerts)} alert(s) to Telegram.")
     finally:
         await app.close()
 
@@ -180,6 +195,19 @@ async def _cmd_browser_check(args) -> None:
     print("OK: Shopping Chrome is ready.")
 
 
+def ensure_web_token(home: Path) -> str:
+    """A random access key for the web page, created once and kept in SHOPPER_HOME."""
+    import secrets
+
+    path = home / "web_token"
+    if path.exists() and path.read_text().strip():
+        return path.read_text().strip()
+    home.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(16)
+    path.write_text(token)
+    return token
+
+
 async def _cmd_serve(args) -> None:
     import uvicorn
 
@@ -188,6 +216,10 @@ async def _cmd_serve(args) -> None:
 
     app = App()
     s = app.settings
+    if not s.web_token:
+        s.web_token = ensure_web_token(s.home)
+        print("WEB_TOKEN was empty, so the web page was open to anyone who can reach it. Using the key saved in "
+              f"{s.home / 'web_token'} instead; put it in .env as WEB_TOKEN to keep it.")
     server = uvicorn.Server(uvicorn.Config(create_app(app), host=s.web_host, port=s.web_port, log_level="info"))
     bot = None
     loop_task = None

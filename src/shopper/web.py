@@ -2,6 +2,8 @@
 from your phone over Tailscale; links carry WEB_TOKEN so only you can open them."""
 from __future__ import annotations
 
+import logging
+import re
 import secrets
 from datetime import datetime
 from html import escape
@@ -22,9 +24,29 @@ def _local(iso: str) -> str:
         return ""
 
 
+log = logging.getLogger(__name__)
+ERRORS = {404: "Page not found", 410: "This comparison is closed", 400: "Something is missing", 500: "Something went wrong"}
+
+
 def create_app(core: App) -> FastAPI:
     api = FastAPI(title="shopper", docs_url=None, redoc_url=None)
     token = core.settings.web_token
+
+    @api.exception_handler(HTTPException)
+    async def friendly(request, exc: HTTPException):
+        title = ERRORS.get(exc.status_code, "Something went wrong")
+        detail = exc.detail if exc.status_code != 404 and isinstance(exc.detail, str) else (
+            "Check the link. Links from the bot and the app carry your access key.")
+        body = f"<div class='panel plan'><p>{escape(detail)}</p></div>"
+        return HTMLResponse(page(title, body, f"<h1>{escape(title)}</h1>"), status_code=exc.status_code)
+
+    async def run_or_explain(requests, **kw):
+        try:
+            return await core.run(requests, **kw)
+        except Exception as e:
+            log.exception("compare failed")
+            raise HTTPException(status_code=500, detail=f"The comparison failed ({type(e).__name__}: {e}). "
+                                "Try again; if it repeats, check that Shopping Chrome is open.") from e
 
     def check(t: str | None) -> None:
         if token and not (t and secrets.compare_digest(t, token)):
@@ -68,6 +90,7 @@ def create_app(core: App) -> FastAPI:
         if items:
             rows = "".join(f"<li><span><b class=qty>{it.qty}×</b> {escape(it.query)}</span>"
                            f"<form method=post action='/list/remove{q(t)}' class=inline><input type=hidden name=index value={i}>"
+                           f"<input type=hidden name=line value='{escape(it.query)}'>"
                            f"<button class=link>Remove</button></form></li>" for i, it in enumerate(items))
             saved = (f"<h2>The household list</h2><div class=panel><ul class=list>{rows}</ul><div class=actions>"
                      f"<form method=post action='/list/compare{q(t)}' class=inline><button>Compare the list</button></form>"
@@ -89,25 +112,26 @@ def create_app(core: App) -> FastAPI:
     @api.post("/compare")
     async def run(items: str = Form(...), exact: str | None = Form(None), max_orders: int = Form(2), t: str | None = Query(None)):
         check(t)
-        requests = core.parse(items)
+        requests = await core.parse_async(items)
         if not requests:
-            raise HTTPException(status_code=400, detail="The list is empty")
-        _, _, rid = await core.run(requests, max_orders=max_orders, exact_only=bool(exact))
+            raise HTTPException(status_code=400, detail="The list is empty. Type at least one item.")
+        _, _, rid = await run_or_explain(requests, max_orders=max_orders, exact_only=bool(exact))
         return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
 
     @api.post("/list/{action}")
-    async def household_list(action: str, items: str = Form(""), index: int = Form(-1), t: str | None = Query(None)):
+    async def household_list(action: str, items: str = Form(""), index: int = Form(-1), line: str | None = Form(None),
+                             t: str | None = Query(None)):
         check(t)
         if action == "add":
-            core.add_to_list(core.parse(items))
+            core.add_to_list(await core.parse_async(items))
         elif action == "remove":
-            core.remove_from_list(index)
+            core.remove_from_list(index, line)  # with the line text, a stale tab cannot remove another line
         elif action == "clear":
             core.clear_list()
         elif action == "compare":
             requests = core.list_items()
             if requests:
-                _, _, rid = await core.run(requests)
+                _, _, rid = await run_or_explain(requests)
                 return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
         else:
             raise HTTPException(status_code=404)
@@ -120,33 +144,50 @@ def create_app(core: App) -> FastAPI:
         if html is None:
             raise HTTPException(status_code=404)
         result = core.results.get(rid)
-        pushable = [core.adapters[p].label for p in (result.best.platforms if result and result.best else [])
-                    if p in core.adapters and core.adapters[p].supports_cart_push]
-        if pushable:
+        if result is None:  # from history: its buttons would act on a comparison that is gone
+            html = re.sub(r"<form method=post action='/r/[^']*'.*?</form>", "", html, flags=re.S)
+            note = (f"<p class=notice><b>From history.</b> Prices are from then, and choices need a fresh comparison. "
+                    f"<a href='/{q(t)}'>Compare again</a></p>")
+            html = html.replace("<main>", "<main>" + note, 1)
+        elif rid in core.push_log:
+            html = html.replace("<!--cart-push-->", "<p class='muted small'>Added to your carts already: "
+                                + escape("; ".join(core.push_log[rid])) + "</p>", 1)
+        elif core.pushable(result) and not any(r.needs_pick for r in result.items):
+            names = ", ".join(core.adapters[p].label for p in core.pushable(result))
             button = (f"<form method=post action='/r/{escape(rid)}/push{q(t)}' style='margin:16px 0 0'>"
-                      f"<button>Add the best plan to my carts ({escape(', '.join(pushable))})</button></form>")
+                      f"<button>Add the best plan to my carts ({escape(names)})</button></form>")
             html = html.replace("<!--cart-push-->", button, 1)
         return pwa.add_head(html, t)
 
-    @api.post("/r/{rid}/push", response_class=HTMLResponse)
+    @api.post("/r/{rid}/push")
     async def push(rid: str, t: str | None = Query(None)):
         check(t)
         result = core.results.get(rid)
         if result is None:
-            raise HTTPException(status_code=404, detail="Compare again; this result is no longer in memory")
-        lines = await core.push_carts(result)
+            raise HTTPException(status_code=410, detail="This comparison is no longer open. Compare the list again.")
+        if rid not in core.push_log:  # once per result: a refresh or double tap must not add everything twice
+            core.push_log[rid] = await core.push_carts(result)
+        return RedirectResponse(f"/r/{rid}/pushed{q(t)}", status_code=303)
+
+    @api.get("/r/{rid}/pushed", response_class=HTMLResponse)
+    async def pushed(rid: str, t: str | None = Query(None)):
+        check(t)
+        lines = core.push_log.get(rid)
+        if lines is None:
+            raise HTTPException(status_code=404)
         body = (f"<div class='panel plan'><ul>{''.join(f'<li>{escape(x)}</li>' for x in lines)}</ul>"
                 f"<p><a href='/r/{escape(rid)}{q(t)}'>Back to the comparison</a></p><p><a href='/{q(t)}'>Compare a new list</a></p></div>")
-        return pwa.add_head(page("Cart push", body, "<h1>Cart push</h1><p>What went into your carts.</p>"), t)
+        return pwa.add_head(page("Cart push", body, "<h1>Cart push</h1><p>What went into your carts. Check each cart before you pay.</p>"), t)
 
     @api.post("/r/{rid}/{action}")
-    async def feedback(rid: str, action: str, item: int = Form(...), card: int | None = Form(None),
-                       platform: str | None = Form(None), t: str | None = Query(None)):
+    async def feedback(rid: str, action: str, item: int = Form(...), card: str | None = Form(None),
+                       platform: str | None = Form(None), offer: str | None = Form(None), t: str | None = Query(None)):
         check(t)
         if action not in ("pick", "reject", "forget"):
             raise HTTPException(status_code=404)
-        if not core.feedback(rid, action, item, card, platform):
-            raise HTTPException(status_code=404, detail="Compare again; this result is no longer in memory")
+        if core.feedback(rid, action, item, card, platform, offer) == "gone":
+            raise HTTPException(status_code=410, detail="This comparison is no longer open, because shopper "
+                                "restarted since. Compare the list again to choose products.")
         return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
 
     @api.get("/manifest.webmanifest")

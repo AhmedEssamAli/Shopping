@@ -17,8 +17,10 @@ from .units import _SINGLE
 log = logging.getLogger(__name__)
 MODEL = "claude-opus-5-5"
 
-_SPLIT = re.compile(r"[\n;,،]+")
-_LEAD_QTY = re.compile(r"^\s*(\d{1,3})\s*(?:[x×*]\s*)?(?=\D)(.+)$", re.I)
+# Commas split lines, except a comma between digits ("milk 1,5L").
+_SPLIT = re.compile(r"[\n;،]+|(?<!\d),|,(?!\d)")
+# The quantity must stand apart ("2 milk", "2x milk"), so "7up 1L" stays one product.
+_LEAD_QTY = re.compile(r"^\s*(\d{1,3})(?:\s*[x×*]\s*|\s+)(\D.*)$", re.I)
 _TRAIL_QTY = re.compile(r"^(.+?)\s*(?:[x×*]\s*(\d{1,3})|\((\d{1,3})\))\s*$", re.I)
 
 

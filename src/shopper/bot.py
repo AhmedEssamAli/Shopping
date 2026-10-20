@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import zlib
 
 from telegram import (BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update)
 from telegram.constants import ChatAction
@@ -54,16 +55,17 @@ def pick_keyboard(core: App, result: CompareResult, rid: str, i: int) -> InlineK
     rows = []
     for j, c in enumerate(result.items[i].cards):
         shops = ", ".join(label(core.settings, p) for p in c.per_platform())
-        text = f"{c.label} — {c.cheapest().price:,.2f} {shops}"
-        rows.append([InlineKeyboardButton(text[:BUTTON_TEXT], callback_data=f"pk:{rid}:{i}:{j}")])
+        other = "" if c.exact else " (other size)"
+        text = f"{c.label}{other} — {c.cheapest().price:,.2f} {shops}"
+        rows.append([InlineKeyboardButton(text[:BUTTON_TEXT], callback_data=f"pk:{rid}:{i}:{c.key}")])
     return InlineKeyboardMarkup(rows)
 
 
-def result_keyboard(core: App, result: CompareResult, rid: str) -> InlineKeyboardMarkup:
-    """Under a result: cart push (when a shop in the plan supports it), save as list, full table."""
+def result_keyboard(core: App, result: CompareResult, rid: str, pushed: bool = False) -> InlineKeyboardMarkup:
+    """Under a result: cart push (once, and only when the plan is final and a shop in it
+    supports it), save as list, full table."""
     rows = []
-    best = result.best
-    if best and any(core.adapters[p].supports_cart_push for p in best.platforms if p in core.adapters):
+    if not pushed and core.pushable(result) and not any(r.needs_pick for r in result.items):
         rows.append([InlineKeyboardButton("Add the plan to my carts", callback_data=f"push:{rid}")])
     rows.append([InlineKeyboardButton("Save as my list", callback_data=f"save:{rid}")])
     url = core.result_url(rid)
@@ -72,21 +74,27 @@ def result_keyboard(core: App, result: CompareResult, rid: str) -> InlineKeyboar
     return InlineKeyboardMarkup(rows)
 
 
-def list_keyboard(n: int) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(f"Remove {i + 1}", callback_data=f"rm:{i}") for i in range(k, min(k + 4, n))]
-            for k in range(0, min(n, LIST_BUTTONS), 4)]
+def line_tag(query: str) -> str:
+    """Short fingerprint of a list line, so a stale Remove button cannot hit another line."""
+    return f"{zlib.crc32(query.encode()) & 0xFFFF:04x}"
+
+
+def list_keyboard(items) -> InlineKeyboardMarkup:
+    n = len(items)
+    rows = [[InlineKeyboardButton(f"Remove {i + 1}", callback_data=f"rm:{i}:{line_tag(items[i].query)}")
+             for i in range(k, min(k + 4, n, LIST_BUTTONS))] for k in range(0, min(n, LIST_BUTTONS), 4)]
     if n:
         rows.append([InlineKeyboardButton("Compare the list", callback_data="cmp"),
                      InlineKeyboardButton("Clear the list", callback_data="clr")])
     return InlineKeyboardMarkup(rows)
 
 
-def parse_callback(data: str) -> tuple[str, str, int, int | None] | None:
-    """"pk:<rid>:<item>:<card>" (pick) or "fg:<rid>:<item>" (choose again)."""
+def parse_callback(data: str) -> tuple[str, str, int, str | None] | None:
+    """"pk:<rid>:<item>:<card key>" (pick) or "fg:<rid>:<item>" (choose again)."""
     parts = (data or "").split(":")
     try:
         if parts[0] == "pk" and len(parts) == 4:
-            return "pick", parts[1], int(parts[2]), int(parts[3])
+            return "pick", parts[1], int(parts[2]), parts[3]
         if parts[0] == "fg" and len(parts) == 3:
             return "forget", parts[1], int(parts[2]), None
     except ValueError:
@@ -98,16 +106,26 @@ def chunks(text: str, limit: int = TG_LIMIT) -> list[str]:
     """Split at line breaks so a message never cuts a line (or a link) in half."""
     out, cur = [], ""
     for line in text.split("\n"):
-        while len(line) > limit:  # one very long line: hard cut
-            out.append(line[:limit])
-            line = line[limit:]
-        if len(cur) + len(line) + 1 > limit:
+        if cur and len(cur) + 1 + len(line) > limit:
             out.append(cur)
             cur = ""
+        while len(line) > limit:  # one very long line: hard cut, after what came before it
+            if cur:
+                out.append(cur)
+                cur = ""
+            out.append(line[:limit])
+            line = line[limit:]
         cur = f"{cur}\n{line}" if cur else line
     if cur:
         out.append(cur)
-    return out
+    return [p for p in out if p.strip()]
+
+
+def alert_keyboard(alert) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("Stop watching", callback_data=f"uw:{alert.watch_id}")]]
+    if alert.url.startswith("https://"):
+        rows.insert(0, [InlineKeyboardButton("Open the product", url=alert.url)])
+    return InlineKeyboardMarkup(rows)
 
 
 async def setup_menu(bot: Application) -> None:
@@ -144,15 +162,22 @@ def build_bot(core: App) -> Application:
             return
         await update.effective_chat.send_action(ChatAction.TYPING)
         n = len(requests)
-        await reply(update, f"Searching {n} item{'s' if n != 1 else ''} in every shop. This takes up to a minute.")
+        waiting = await update.effective_message.reply_text(
+            f"Searching {n} item{'s' if n != 1 else ''} in every shop. This takes up to a minute.")
         try:
-            result, text, rid = await core.run(requests, exact_only=exact)
+            result, _, rid = await core.run(requests, exact_only=exact)
         except Exception as e:
             log.exception("compare failed")
-            await reply(update, f"The comparison failed: {type(e).__name__}: {e}")
+            await reply(update, f"The comparison failed ({type(e).__name__}: {e}). Try again; if it repeats, "
+                                "check that shopper serve and Shopping Chrome are running.")
             return
+        finally:
+            try:
+                await waiting.delete()
+            except Exception:
+                pass
         core.last_results[update.effective_chat.id] = result
-        await reply(update, text, result_keyboard(core, result, rid))
+        await reply(update, core.text(rid, chat=True), result_keyboard(core, result, rid))
         for i, r in enumerate(result.items):
             if r.needs_pick:
                 await update.effective_message.reply_text(
@@ -164,9 +189,9 @@ def build_bot(core: App) -> Application:
         text = ("\n".join(f"{i + 1}. {it.qty} × {it.query}" for i, it in enumerate(items))
                 or "The list is empty. Add lines with /add, or press Save as my list under a result.")
         if edit and update.callback_query:
-            await update.callback_query.edit_message_text(text[:TG_LIMIT], reply_markup=list_keyboard(len(items)))
+            await update.callback_query.edit_message_text(text[:TG_LIMIT], reply_markup=list_keyboard(items))
         else:
-            await reply(update, text, list_keyboard(len(items)))
+            await reply(update, text, list_keyboard(items))
 
     async def show_watches(update: Update, edit: bool = False) -> None:
         rows = core.store.list_watches(update.effective_chat.id)
@@ -200,7 +225,7 @@ def build_bot(core: App) -> Application:
         elif text == HOW:
             await reply(update, HELP, MENU)
         else:
-            await run_compare(update, core.parse(text))
+            await run_compare(update, await core.parse_async(text))
 
     async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -217,14 +242,21 @@ def build_bot(core: App) -> Application:
                 await query.answer("This comparison is no longer open. Send the list again.", show_alert=True)
             elif kind == "push":
                 await query.answer("Adding to your carts")
+                try:  # one push per result: a second tap would add everything twice
+                    await query.edit_message_reply_markup(result_keyboard(core, result, rest, pushed=True))
+                except Exception:
+                    pass
                 await push_result(update, result)
             else:
                 core.save_list([r.request for r in result.items])
                 await query.answer("Saved as your list")
                 await reply(update, f"Saved {len(result.items)} line(s) as the household list.")
-        elif kind == "rm" and rest.isdigit():
-            removed = core.remove_from_list(int(rest))
-            await query.answer("Removed" if removed else "That line is already gone")
+        elif kind == "rm":
+            index, _, tag = rest.partition(":")
+            items = core.list_items()
+            i = int(index) if index.isdigit() else -1
+            removed = 0 <= i < len(items) and line_tag(items[i].query) == tag and core.remove_from_list(i, items[i].query)
+            await query.answer("Removed" if removed else "The list changed; nothing was removed")
             await show_list(update, edit=True)
         elif kind == "cmp":
             await query.answer()
@@ -246,11 +278,11 @@ def build_bot(core: App) -> Application:
         if not parsed or result is None:
             await query.answer("This comparison is no longer open. Send the list again.", show_alert=True)
             return
-        action, rid, i, j = parsed
+        action, rid, i, key = parsed
         r = result.items[i] if 0 <= i < len(result.items) else None
-        chosen = r.cards[j].label if r and action == "pick" and j is not None and 0 <= j < len(r.cards) else None
-        if not core.feedback(rid, action, i, card=j):
-            await query.answer("That choice is no longer available. Send the list again.", show_alert=True)
+        chosen = next((c.label for c in r.cards if c.key == key), None) if r else None
+        if core.feedback(rid, action, i, card=key) != "ok":
+            await query.answer("Already done, or that choice is no longer available.", show_alert=True)
             return
         await query.answer("Saved")
         if action == "pick":
@@ -261,17 +293,17 @@ def build_bot(core: App) -> Application:
             await query.edit_message_text(f"Which one do you mean? {r.request.qty} × {r.request.query}",
                                           reply_markup=pick_keyboard(core, result, rid, i))
         if not any(x.needs_pick for x in result.items):
-            await reply(update, "Updated plan:\n" + core.text(rid), result_keyboard(core, result, rid))
+            await reply(update, "Updated plan:\n" + core.text(rid, chat=True), result_keyboard(core, result, rid))
 
     async def add(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not ok(update):
             return
-        items = core.parse(update.effective_message.text.partition(" ")[2] or "")
+        items = await core.parse_async(update.effective_message.text.partition(" ")[2] or "")
         if not items:
             await reply(update, "Usage: /add 2 Juhayna full cream milk 1L (one item per line)")
             return
         core.add_to_list(items)
-        await reply(update, f"Added {len(items)}. The list has {len(core.list_items())} line(s).", list_keyboard(len(core.list_items())))
+        await reply(update, f"Added {len(items)}. The list has {len(core.list_items())} line(s).", list_keyboard(core.list_items()))
 
     async def show(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if ok(update):
@@ -353,8 +385,9 @@ async def watch_loop(core: App, bot: Application, interval_s: float, first_delay
     await asyncio.sleep(first_delay_s)
     while True:
         try:
-            for chat_id, text in await check_watches(core):
-                await bot.bot.send_message(chat_id, text, disable_web_page_preview=True)
+            for alert in await check_watches(core):
+                await bot.bot.send_message(alert.chat_id, alert.text, disable_web_page_preview=True,
+                                           reply_markup=alert_keyboard(alert))
         except Exception:
             log.exception("watch check failed")
         await asyncio.sleep(interval_s)

@@ -75,8 +75,12 @@ class Store:
         return list(rows)
 
     def merge_lists_into(self, owner: int) -> None:
-        """One household list: older per-chat lists move to ``owner``."""
-        self.db.execute("UPDATE lists SET chat_id=? WHERE chat_id != ?", (owner, owner))
+        """One household list: older per-chat lists move to ``owner``, in order, after its own."""
+        rows = self.db.execute("SELECT query, qty FROM lists ORDER BY chat_id != ?, chat_id, pos", (owner,)).fetchall()
+        if not self.db.execute("SELECT 1 FROM lists WHERE chat_id != ? LIMIT 1", (owner,)).fetchone():
+            return
+        self.db.execute("DELETE FROM lists")
+        self.db.executemany("INSERT INTO lists VALUES (?,?,?,?)", [(owner, i, q, n) for i, (q, n) in enumerate(rows)])
         self.db.commit()
 
     def get_result(self, rid: str) -> str | None:

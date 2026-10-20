@@ -26,6 +26,7 @@ def _evaluate(
         else:
             missing.append(i)
 
+    _meet_minimums(platforms, matches, assignments, fees)
     subtotals: dict[str, float] = {}
     for m in assignments.values():
         subtotals[m.offer.platform] = subtotals.get(m.offer.platform, 0.0) + m.line_total
@@ -36,6 +37,28 @@ def _evaluate(
             return None
     fee_map = {p: fees.get(p, PlatformFees()).fees_for(sub) for p, sub in subtotals.items()}
     return Proposal(platforms, assignments, subtotals, fee_map, missing)
+
+
+def _meet_minimums(platforms: tuple[str, ...], matches: dict[str, dict[int, Match]],
+                   assignments: dict[int, Match], fees: dict[str, PlatformFees]) -> None:
+    """Move items into a shop that is under its minimum order, cheapest extra cost first.
+
+    Each item first goes to its cheapest shop; that can leave one shop just under its
+    minimum when moving a single item there would cost a pound more and save a whole order.
+    A move never swaps an exact match for a close one.
+    """
+    def subtotal(p: str) -> float:
+        return sum(m.line_total for m in assignments.values() if m.offer.platform == p)
+
+    for p in platforms:
+        need = fees.get(p, PlatformFees()).min_order
+        while 0 < need and subtotal(p) < need:
+            moves = [(matches[p][i].line_total - m.line_total, i) for i, m in assignments.items()
+                     if m.offer.platform != p and i in matches.get(p, {}) and (matches[p][i].exact or not m.exact)]
+            if not moves:
+                break
+            _, i = min(moves)
+            assignments[i] = matches[p][i]
 
 
 def optimise(

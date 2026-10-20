@@ -49,7 +49,7 @@ async def test_pick_once_then_the_plan_uses_your_product(tmp_path):
     assert result.best.assignments[0].offer.price == 261.99  # cheapest exact today: the pouch
 
     jar = next(j for j, c in enumerate(result.items[0].cards) if c.label == "200g, jar")
-    assert app.feedback(rid, "pick", 0, card=jar)
+    assert app.feedback(rid, "pick", 0, card=result.items[0].cards[jar].key) == "ok"
     m = result.best.assignments[0]
     assert m.offer.name.startswith("Nestlé") and m.pinned and not result.items[0].needs_pick
     pouch = result.items[0].matches["amazon"]
@@ -64,13 +64,13 @@ async def test_passed_over_pack_words_become_avoided(tmp_path):
     app = core(tmp_path)
     mem: Memory = app.memory
     result, _, rid = await app.run([COFFEE])
-    app.feedback(rid, "pick", 0, card=next(j for j, c in enumerate(result.items[0].cards) if c.label == "200g, jar"))
+    app.feedback(rid, "pick", 0, card=next(c.key for c in result.items[0].cards if c.label == "200g, jar"))
     assert "sachet" not in mem.avoid_words()  # once is not a habit
     tea = {"noon": [("Lipton Yellow Label Tea Sachet 100 bags", 120.0), ("Lipton Yellow Label Tea Box 100 bags", 130.0)]}
     app2 = core(tmp_path / "x", tea)
     app2.memory = mem  # same household memory
     r2, _, rid2 = await app2.run([ItemRequest("Lipton yellow label tea 100 bags")])
-    app2.feedback(rid2, "pick", 0, card=next(j for j, c in enumerate(r2.items[0].cards) if "box" in c.forms))
+    app2.feedback(rid2, "pick", 0, card=next(c.key for c in r2.items[0].cards if "box" in c.forms))
     assert "sachet" in mem.avoid_words()
     r3, _, _ = await app2.run([ItemRequest("Lipton tea 100 bags")])  # a new line, never picked
     assert not r3.items[0].needs_pick and "Box" in r3.items[0].matches["noon"].offer.name
@@ -80,7 +80,11 @@ async def test_not_this_removes_a_listing_for_that_line(tmp_path):
     app = core(tmp_path)
     result, _, rid = await app.run([COFFEE])
     assert result.items[0].matches["noon"].offer.name == "Nescafe Classic Sachet 200grams"
-    assert app.feedback(rid, "reject", 0, platform="noon")
+    from shopper.memory import offer_key
+    stale = app.feedback(rid, "reject", 0, platform="noon", offer="00000000")
+    assert stale == "stale" and result.items[0].matches["noon"].offer.name == "Nescafe Classic Sachet 200grams"
+    assert app.feedback(rid, "reject", 0, platform="noon", offer=offer_key(result.items[0].matches["noon"].offer)) == "ok"
+    assert all("Sachet" not in o.name for c in result.items[0].cards for o in c.offers)  # gone from the cards too
     assert result.items[0].matches["noon"] is None or "Sachet" not in result.items[0].matches["noon"].offer.name
     again, _, _ = await app.run([COFFEE])
     assert again.items[0].matches["noon"] is None or "Sachet" not in again.items[0].matches["noon"].offer.name
@@ -92,11 +96,12 @@ def test_web_buttons_pick_and_change(tmp_path):
     page = client.post("/compare?t=k", data={"items": "Nescafe classic 200g", "max_orders": 2}, follow_redirects=True)
     assert "Choose your products" in page.text and "This one" in page.text and "not this" in page.text
     rid = page.url.path.split("/")[-1]
-    picked = client.post(f"/r/{rid}/pick?t=k", data={"item": 0, "card": 0}, follow_redirects=True)
+    key = app.results[rid].items[0].cards[0].key
+    picked = client.post(f"/r/{rid}/pick?t=k", data={"item": 0, "card": key}, follow_redirects=True)
     assert "your product" in picked.text and "Learned so far: 1 chosen product," in picked.text
     changed = client.post(f"/r/{rid}/forget?t=k", data={"item": 0}, follow_redirects=True)
     assert "Choose your products" in changed.text
-    assert client.post(f"/r/{rid}/pick", data={"item": 0, "card": 0}).status_code == 404  # token required
+    assert client.post(f"/r/{rid}/pick", data={"item": 0, "card": key}).status_code == 404  # token required
     assert client.post(f"/r/{rid}/delete?t=k", data={"item": 0}).status_code == 404
 
 
@@ -134,3 +139,23 @@ async def test_telegram_buttons_pick_and_choose_again(tmp_path):
     query.data = "pk:gone:0:0"
     await handler.callback(update, None)
     assert "no longer open" in query.answer.call_args.args[0]
+
+
+async def test_stale_pick_button_cannot_choose_another_product(tmp_path):
+    app = core(tmp_path)
+    result, _, rid = await app.run([COFFEE])
+    sachet = next(c.key for c in result.items[0].cards if "sachet" in c.forms)
+    jar = next(c.key for c in result.items[0].cards if "jar" in c.forms)
+    assert app.feedback(rid, "pick", 0, card=jar) == "ok"
+    assert app.memory.recall(COFFEE).canonical.endswith("jar")
+    app.feedback(rid, "forget", 0)  # cards come back, sorted differently than the old message
+    assert app.feedback(rid, "pick", 0, card=sachet) == "ok"  # an old button still means sachet
+    assert app.memory.recall(COFFEE).canonical.endswith("sachet")
+    assert app.feedback(rid, "pick", 0, card="deadbeef") == "stale"
+    assert sachet != jar
+
+
+def test_cards_split_rice_kinds():
+    offers = [Offer("a", "Shahy Basmati Rice 5kg", 700, "u1"), Offer("b", "Al Doha Egyptian Rice 5kg", 220, "u2")]
+    cards = product_cards(ItemRequest("rice 5kg"), offers)
+    assert {c.label for c in cards} == {"5kg, pack type not stated, basmati", "5kg, pack type not stated, egyptian"}

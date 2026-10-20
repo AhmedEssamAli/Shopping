@@ -26,3 +26,9 @@ def test_commas_and_arabic_comma_split():
 
 def test_no_key_uses_local_parser():
     assert as_pairs(parse_list("3x Pepsi 1L", api_key="")) == [("Pepsi 1L", 3)]
+
+
+def test_brand_digits_and_decimal_commas():
+    from shopper.parsing import parse_local
+    items = parse_local("7up 1L, 2 milk 1,5L")
+    assert [(i.qty, i.query) for i in items] == [(1, "7up 1L"), (2, "milk 1,5L")]

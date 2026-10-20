@@ -73,3 +73,13 @@ def test_exact_in_subset_beats_cheaper_close_match():
 def test_close_match_used_when_no_exact_exists():
     matches = {"A": {0: m("A", 0, 10, exact=False)}, "B": {0: m("B", 0, 30, exact=False)}}
     assert optimise(matches, 1, {})[0].platforms == ("A",)
+
+
+def test_moves_an_item_to_meet_a_minimum_order():
+    def m(p, i, price):
+        return Match(ItemRequest(f"item {i}"), Offer(p, f"x{i}", price, "u"), 100, True)
+    matches = {"A": {0: m("A", 0, 90), 1: m("A", 1, 20)}, "B": {0: m("B", 0, 89), 1: m("B", 1, 25), 2: m("B", 2, 50)}}
+    fees = {"A": PlatformFees(min_order=100), "B": PlatformFees()}
+    best = optimise(matches, 3, fees)[0]
+    assert best.platforms == ("A", "B") and round(best.total, 2) == 160.0
+    assert best.assignments[0].offer.platform == "A"
