@@ -244,7 +244,7 @@ def create_app(core: App) -> FastAPI:
     async def feedback(rid: str, action: str, item: int = Form(...), card: str | None = Form(None),
                        platform: str | None = Form(None), offer: str | None = Form(None), t: str | None = Query(None)):
         check(t)
-        if action not in ("pick", "reject", "forget"):
+        if action not in ("pick", "reject", "forget", "confirm", "deny"):
             raise HTTPException(status_code=404)
         if core.feedback(rid, action, item, card, platform, offer) == "gone":
             raise HTTPException(status_code=410, detail="This comparison is no longer open, because shopper "

@@ -98,7 +98,7 @@ def test_web_buttons_pick_and_change(tmp_path):
     rid = page.url.path.split("/")[-1]
     key = app.results[rid].items[0].cards[0].key
     picked = client.post(f"/r/{rid}/pick?t=k", data={"item": 0, "card": key}, follow_redirects=True)
-    assert "your product" in picked.text and "Learned so far: 1 chosen product," in picked.text
+    assert "your product" in picked.text and "1 chosen product," in picked.text
     changed = client.post(f"/r/{rid}/forget?t=k", data={"item": 0}, follow_redirects=True)
     assert "Choose your products" in changed.text
     assert client.post(f"/r/{rid}/pick", data={"item": 0, "card": key}).status_code == 404  # token required

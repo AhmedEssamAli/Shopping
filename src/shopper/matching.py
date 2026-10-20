@@ -79,13 +79,14 @@ def score(request: ItemRequest, offer: Offer, avoid: frozenset[str] = frozenset(
     return Match(request, offer, max(s, 0.0), exact)
 
 
-def best_match(request: ItemRequest, offers: list[Offer], avoid: frozenset[str] = frozenset()) -> Match | None:
+def best_match(request: ItemRequest, offers: list[Offer], avoid: frozenset[str] = frozenset(), keep=None) -> Match | None:
     """Best acceptable in-stock offer from one platform.
 
     Any exact match beats every close one, and the cheapest exact wins. Without an exact
     match, the closest-scoring offer wins, cheapest among equals.
     """
-    cands = [m for m in (score(request, o, avoid) for o in offers if o.in_stock) if m.score >= ACCEPT_SCORE]
+    cands = [m for m in (score(request, o, avoid) for o in offers if o.in_stock and (keep is None or keep(o)))
+             if m.score >= ACCEPT_SCORE]
     if not cands:
         return None
     return min(cands, key=lambda m: (0, 0, m.offer.price) if m.exact else (1, -round(m.score, -1), m.offer.price))

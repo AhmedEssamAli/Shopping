@@ -25,6 +25,7 @@ class ItemResult:
     tip: ValueTip | None = None  # a cheaper-per-unit pack of the item chosen in the best plan
     cards: list[ProductCard] = field(default_factory=list)  # distinct products found, for you to pick
     recall: Recall | None = None  # what was remembered for this line
+    confidence: float | None = None  # the learner's probability that the plan's offer is the right product
 
     @property
     def pinned(self) -> bool:
@@ -63,17 +64,19 @@ def search_phrase(request: ItemRequest, recall: Recall | None = None) -> str:
     return strip_sizes(text) or text
 
 
-def match_on(request: ItemRequest, platform: str, offers: list[Offer], recall: Recall | None) -> Match | None:
-    """Best offer on one platform, using what you chose and rejected before."""
+def match_on(request: ItemRequest, platform: str, offers: list[Offer], recall: Recall | None, learner=None) -> Match | None:
+    """Best offer on one platform, using what you chose and rejected before, and (once
+    trained) dropping offers the learner rates as the wrong product."""
+    keep = learner.keep(request, offers, recall.avoid if recall else frozenset()) if learner else None
     if not recall:
-        return best_match(request, offers)
+        return best_match(request, offers, keep=keep)
     offers = [o for o in offers if (o.platform, offer_id(o)) not in recall.rejected]
     pin = recall.pins.get(platform)
     hit = next((o for o in offers if pin and offer_id(o) == pin and o.in_stock), None)
     if hit:
         return Match(request, hit, 100.0, True, pinned=True)
     target = ItemRequest(recall.canonical, request.qty) if recall.canonical else request
-    m = best_match(target, offers, recall.avoid)
+    m = best_match(target, offers, recall.avoid, keep)
     return Match(request, m.offer, m.score, m.exact) if m else None
 
 
@@ -84,6 +87,7 @@ async def compare(
     max_orders: int | None = None,
     exact_only: bool = False,
     memory: Memory | None = None,
+    learner=None,
 ) -> CompareResult:
     active = [adapters[p.name] for p in settings.enabled() if p.name in adapters]
     errors: dict[str, str] = {}
@@ -105,18 +109,18 @@ async def compare(
 
     await asyncio.gather(*(run(i, a) for i in range(len(requests)) for a in active))
     result = CompareResult(results, [a.name for a in active], [], errors, [], max_orders=max_orders, exact_only=exact_only)
-    return assemble(result, settings, adapters)
+    return assemble(result, settings, adapters, learner=learner)
 
 
 def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adapter],
-             memory: Memory | None = None) -> CompareResult:
+             memory: Memory | None = None, learner=None) -> CompareResult:
     """Match, group and optimise the offers already fetched. Runs again, without searching,
     after you pick or reject a product (pass ``memory`` to re-read what you chose)."""
     active = [adapters[p] for p in result.platforms if p in adapters]
     for r in result.items:
         if memory:
             r.recall = memory.recall(r.request)
-        r.matches = {p: match_on(r.request, p, offers, r.recall) for p, offers in r.candidates.items()}
+        r.matches = {p: match_on(r.request, p, offers, r.recall, learner) for p, offers in r.candidates.items()}
         rejected = r.recall.rejected if r.recall else set()
         r.cards = product_cards(r.request, [o for offers in r.candidates.values() for o in offers],
                                 r.recall.avoid if r.recall else frozenset(), rejected)
@@ -135,6 +139,8 @@ def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adap
         rejected = r.recall.rejected if r.recall else set()
         pool = [o for offers in r.candidates.values() for o in offers if (o.platform, offer_id(o)) not in rejected]
         r.tip = value_tip(r.request, result.proposals[0].assignments.get(i), pool) if result.proposals else None
+        chosen = result.proposals[0].assignments.get(i) if result.proposals else None
+        r.confidence = (1.0 if chosen.pinned else learner.confidence(r.request, chosen.offer, pool)) if (chosen and learner) else None
     return result
 
 

@@ -7,7 +7,8 @@ from urllib.parse import quote
 from .adapters import build_adapters
 from .adapters.appshop import PriceBook
 from .browser import BrowserSession
-from .memory import Memory, offer_key
+from .learner import Learner
+from .memory import Memory, offer_id, offer_key
 from .config import Settings, load_settings
 from .models import ItemRequest
 from .parsing import parse_list
@@ -27,6 +28,7 @@ class App:
         self.store.merge_lists_into(HOUSEHOLD)
         needs_browser = any(p.status == "browser" for p in self.settings.enabled())
         self.browser = BrowserSession(self.settings) if needs_browser else None
+        self.learner = Learner(self.store.db)  # learns from your answers which matches are right
         self.prices = PriceBook(self.store.db)  # prices typed in from app-only shops
         self.adapters = build_adapters(self.settings, self.browser, self.prices)
         self.last_rid: dict[int, str] = {}  # per Telegram chat, for /push
@@ -52,7 +54,7 @@ class App:
     async def run(self, requests: list[ItemRequest], max_orders: int | None = None, exact_only: bool = False
                   ) -> tuple[CompareResult, str, str]:
         """Returns (result, chat text, saved result id)."""
-        result = await compare(requests, self.settings, self.adapters, max_orders, exact_only, self.memory)
+        result = await compare(requests, self.settings, self.adapters, max_orders, exact_only, self.memory, self.learner)
         self.store.record_offers(all_offers(result))
         rid = self.store.save_result("")
         self.results[rid] = result
@@ -72,7 +74,7 @@ class App:
     def _render(self, rid: str) -> None:
         result = self.results[rid]
         html = to_html(result, self.settings, self.adapters, base=f"/r/{rid}",
-                       token=self.settings.web_token, learned=self.memory.learned())
+                       token=self.settings.web_token, learned={**self.memory.learned(), "answers": self.learner.answers})
         n = len(result.items)
         lines = ", ".join(r.request.query for r in result.items[:3]) + ("…" if n > 3 else "")
         total = f"EGP {result.best.total:,.2f}" if result.best else "no plan"
@@ -115,16 +117,31 @@ class App:
             return "stale"
         r = result.items[item]
         m = r.matches.get(platform) if platform else None
+        if action == "confirm" and m and not r.pinned and offer_key(m.offer) == offer:
+            # "Right product? Yes": choose the card this offer belongs to, as if you had picked it.
+            card = next((c.key for c in r.cards if any(offer_id(o) == offer_id(m.offer) for o in c.offers)), None)
+            action = "pick"
+        elif action == "deny":
+            action = "reject"  # "Right product? No" is "not this"
         chosen = next((c for c in r.cards if c.key == card), None)
+        pool = [o for offers in r.candidates.values() for o in offers]
+        cheapest = min((o.price for o in pool), default=None)
+        avoid = r.recall.avoid if r.recall else frozenset()
         if action == "pick" and chosen and not r.pinned:  # a second tap on "This one" is a no-op
+            for o in chosen.per_platform().values():
+                self.learner.learn(r.request, o, True, cheapest, avoid)
+            for other in r.cards:  # exact products you passed over are examples of "not this one"
+                if other is not chosen and other.exact:
+                    self.learner.learn(r.request, other.cheapest(), False, cheapest, avoid)
             self.memory.pick(r.request, chosen, r.cards)
         elif action == "reject" and m and not m.pinned and offer_key(m.offer) == offer:
+            self.learner.learn(r.request, m.offer, False, cheapest, avoid)
             self.memory.reject(r.request, m.offer)
         elif action == "forget" and r.pinned:
             self.memory.forget(r.request)
         else:
             return "stale"
-        assemble(result, self.settings, self.adapters, self.memory)
+        assemble(result, self.settings, self.adapters, self.memory, self.learner)
         self._render(rid)
         return "ok"
 

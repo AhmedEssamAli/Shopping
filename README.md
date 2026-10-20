@@ -132,7 +132,11 @@ A short line like "Nescafe classic 200g" fits several products: a jar, a pouch a
 5. **In Telegram.** When several products fit a line, the bot sends "Which one do you mean?" with one button per product (size, pack type, lowest price, shops). Tap one; the bot confirms, offers **Choose again**, and sends the updated plan once every line is chosen.
 6. **Words you avoid.** When you pass over a pack or variant word twice and never choose it (for example "sachet"), it stops counting as an exact match on every line that does not ask for it. Choosing it once undoes this.
 
-Why memory and not a trained model: big retailers learn ranking from millions of clicks. One household makes a few dozen choices a month, which is too few to train on. Each choice is a direct answer, so storing it is exact from the first pick. shopper still uses each retailer's own search to find the listings.
+**Right product? Yes / No.** Every line of a result asks it, on the page and in Telegram (one message with a Yes and a No per line). Yes pins that product, like **This one**. No removes it, like **not this**, and shows the next best.
+
+**The learner** (`learner.py`) turns every answer, pick and "not this" into a labelled example and updates a small logistic-regression model at once, from features such as word coverage, size agreement, variant words, brand and price against the cheapest. Each line shows its **match confidence** (high, medium, low), so you see where the search may have missed. After 20 answers, the learner also drops candidates it rates as probably wrong (below 25%) before the cheapest exact match is chosen. The examples are kept in the SQLite file, so the model can be retrained or checked later.
+
+Why both memory and a small model: memory is exact for the lines you have answered; the model generalises what it learned to new lines. Big retailers train on millions of clicks; one household makes a few dozen answers a month, so the model stays small and starts from sensible default weights. shopper still uses each retailer's own search to find the listings.
 
 The buttons work on comparisons made since `shopper serve` last started. Older pages say "Compare again".
 

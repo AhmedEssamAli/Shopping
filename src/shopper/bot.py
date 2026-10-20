@@ -85,6 +85,27 @@ def line_tag(query: str) -> str:
     return f"{zlib.crc32(query.encode()) & 0xFFFF:04x}"
 
 
+CHECK_LINES = 8  # lines asked "right product?" under one result
+
+
+def check_keyboard(result: CompareResult, rid: str) -> InlineKeyboardMarkup | None:
+    """"Right product?" Yes / No per line of the plan that you have not chosen a product for."""
+    from .learner import confidence_label
+    from .memory import offer_key
+
+    rows = []
+    best = result.best
+    for i, r in enumerate(result.items):
+        m = best.assignments.get(i) if best else None
+        if not m or r.pinned or r.needs_pick or len(rows) >= CHECK_LINES:
+            continue
+        conf = f" ({confidence_label(r.confidence)})" if r.confidence is not None else ""
+        key = f"{rid}:{i}:{m.offer.platform}:{offer_key(m.offer)}"
+        rows.append([InlineKeyboardButton(f"Yes: {m.offer.name}"[:BUTTON_TEXT - 8] + conf, callback_data=f"cf:{key}"),
+                     InlineKeyboardButton("No", callback_data=f"dn:{key}")])
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
 def list_keyboard(items) -> InlineKeyboardMarkup:
     n = len(items)
     rows = [[InlineKeyboardButton(f"Remove {i + 1}", callback_data=f"rm:{i}:{line_tag(items[i].query)}")
@@ -200,6 +221,10 @@ def build_bot(core: App) -> Application:
                 pass
         core.last_rid[update.effective_chat.id] = rid
         await reply(update, core.chat_text(rid), result_keyboard(core, result, rid), html=True)
+        checks = check_keyboard(result, rid)
+        if checks:
+            await update.effective_message.reply_text("Right products? Your answers teach shopper what you mean.",
+                                                      reply_markup=checks)
         for i, r in enumerate(result.items):
             if r.needs_pick:
                 await update.effective_message.reply_text(
@@ -295,6 +320,8 @@ def build_bot(core: App) -> Application:
             core.clear_list()
             await query.answer("List cleared")
             await show_list(update, edit=True)
+        elif kind in ("cf", "dn"):
+            await on_check(update, query, kind, rest)
         elif kind == "ap" and rest in app_shops():
             await query.answer()
             await ask_prices(update, rest)
@@ -304,6 +331,31 @@ def build_bot(core: App) -> Application:
             await show_watches(update, edit=True)
         else:
             await query.answer()
+
+    async def on_check(update: Update, query, kind: str, rest: str) -> None:
+        rid, i, platform, key = (rest.split(":") + ["", "", "", ""])[:4]
+        result = core.results.get(rid)
+        if result is None or not i.isdigit():
+            await query.answer("This comparison is no longer open. Send the list again.", show_alert=True)
+            return
+        status = core.feedback(rid, "confirm" if kind == "cf" else "deny", int(i), platform=platform, offer=key)
+        if status != "ok":
+            await query.answer("Already answered.")
+            return
+        r = result.items[int(i)]
+        await query.answer("Thanks: remembered" if kind == "cf" else "Noted: that one will not come back")
+        try:
+            await query.edit_message_reply_markup(check_keyboard(result, rid))
+        except Exception:
+            pass
+        if kind == "dn":
+            m = result.best.assignments.get(int(i)) if result.best else None
+            nxt = f"Next best for {r.request.query}: {m.offer.name} at {label(core.settings, m.offer.platform)}, " \
+                  f"{m.offer.price:,.2f}." if m else f"No other match for {r.request.query}."
+            await reply(update, nxt)
+            if r.needs_pick:
+                await update.effective_message.reply_text(f"Which one do you mean? {r.request.qty} × {r.request.query}",
+                                                          reply_markup=pick_keyboard(core, result, rid, int(i)))
 
     async def on_pick(update: Update, query) -> None:
         parsed = parse_callback(query.data)

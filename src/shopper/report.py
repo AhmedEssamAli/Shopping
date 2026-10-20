@@ -6,6 +6,7 @@ from html import escape
 from .adapters import Adapter
 from .config import Settings
 from .models import Proposal
+from .learner import confidence_label
 from .memory import offer_key
 from .service import CompareResult
 
@@ -213,6 +214,10 @@ font-weight:700;border-radius:4px;padding:2px 10px;line-height:1.1;font-variant-
 .line>header{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin-bottom:12px}
 .qty{font-family:var(--num);font-weight:700;font-size:20px;color:var(--basil)}
 .state{font-size:13px}.state.pick{color:var(--tomato);font-weight:700}
+.ask{font-size:13px;display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+button.yes,button.no{padding:3px 10px;font-size:13px;border-radius:999px}button.no{background:var(--tomato-bg);color:var(--tomato)}
+.conf{font-size:12px;border-radius:999px;padding:1px 8px;background:var(--leaf)}.conf.low{background:var(--tomato-bg);color:var(--tomato)}
+.conf.high{background:var(--basil);color:var(--basil-ink)}
 .labels{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
 .label{border:1px solid var(--line);border-top:4px solid var(--basil);border-radius:4px;padding:8px 10px 10px;background:var(--card)}
 .label.best{background:var(--tag);border-color:var(--tag);color:var(--tag-ink)}.label.best .muted{color:#4d4a2a}
@@ -357,10 +362,16 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
                       f"<div class='flag {'close' if not m.exact else ''}'>{escape(flags)}</div>{no}</li>")
     missing = [label(settings, p) for p in result.platforms if not r.matches.get(p)]
     state = ""
+    plan = result.best.assignments.get(i) if result.best else None
     if r.pinned:
         state = "<span class='state muted'>your product</span>" + _button(base and base + "/forget", q, "change", {"item": i})
     elif r.needs_pick:
         state = f"<a class='state pick' href='#pick-{i}'>choose your product</a>"
+    elif plan and base:
+        f = {"item": i, "platform": plan.offer.platform, "offer": offer_key(plan.offer)}
+        conf = f" <span class='conf {confidence_label(r.confidence)}'>match {confidence_label(r.confidence)}</span>" if r.confidence is not None else ""
+        state = (f"<span class=ask>{conf} Right product? {_button(base + '/confirm', q, 'Yes', f, 'yes')}"
+                 f"{_button(base + '/deny', q, 'No', f, 'no')}</span>")
     body = f"<ul class=labels>{''.join(labels)}</ul>" if labels else "<p class=muted>No shop had this item.</p>"
     miss = f"<p class='missing muted'>Not found at {escape(', '.join(missing))}</p>" if labels and missing else ""
     choose = ""
@@ -398,7 +409,8 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     notes += [f"{a.label} prices are for its {a.branch} branch, the one that serves your location (AREA_LAT, AREA_LON)."
               for p, a in adapters.items() if p in result.platforms and getattr(a, "branch", None)]
     if learned:
-        notes.append(f"Learned so far: {learned['lines']} chosen product{'s' if learned['lines'] != 1 else ''}, "
+        notes.append(f"Learned so far: {learned.get('answers', 0)} answer{'s' if learned.get('answers', 0) != 1 else ''}, "
+                     f"{learned['lines']} chosen product{'s' if learned['lines'] != 1 else ''}, "
                      f"{learned['rejects']} rejected listing{'s' if learned['rejects'] != 1 else ''}, "
                      f"{learned['avoid']} avoided word{'s' if learned['avoid'] != 1 else ''}.")
     notes_html = "<div class='notes muted'>" + "".join(f"<p>{escape(x)}</p>" for x in notes) + "</div>" if notes else ""
