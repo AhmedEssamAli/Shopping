@@ -32,6 +32,7 @@ class Offer:
     regular_price: float | None = None
     in_stock: bool = True
     cart_ref: str = ""  # platform id used to build cart links (e.g. Amazon ASIN)
+    image: str = ""  # product photo URL, when the shop gives one
     fetched_at: datetime = field(default_factory=now_utc)
 
     @property

@@ -363,6 +363,8 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
         notes.append("Fees not verified, counted as 0: " + ", ".join(label(settings, p) for p in result.unverified_fees))
     notes += [f"{label(settings, p)}: {e}" for p, e in result.errors.items()]
     notes += [f"{label(settings, p)} prices are from its catalogue snapshot of {t}." for p, t in snapshot_ages(result).items()]
+    notes += [f"{a.label} prices are for its {a.branch} branch, the one that serves your location (AREA_LAT, AREA_LON)."
+              for p, a in adapters.items() if p in result.platforms and getattr(a, "branch", None)]
     if learned:
         notes.append(f"Learned so far: {learned['lines']} chosen product{'s' if learned['lines'] != 1 else ''}, "
                      f"{learned['rejects']} rejected listing{'s' if learned['rejects'] != 1 else ''}, "

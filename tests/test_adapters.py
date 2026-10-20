@@ -97,3 +97,36 @@ def test_gourmet_size_comes_from_product_weight():
     offers = gourmet().parse(load("magento_gourmet_juhayna_milk.json"))
     m = best_match(ItemRequest("Juhayna skimmed milk 1L"), offers)
     assert m.exact and m.offer.size.total == 1000 and m.offer.url == "https://gourmetegypt.com/juhayna-skimmed-milk"
+
+
+async def test_magento_branch_header_from_find_store():
+    class Resp:
+        def __init__(self, data):
+            self.data = data
+
+        def json(self):
+            return self.data
+
+        def raise_for_status(self):
+            pass
+
+    class Http:
+        def __init__(self):
+            self.calls = []
+
+        async def post(self, url, json=None, headers=None):
+            self.calls.append((json["query"], headers or {}))
+            if "findStore" in json["query"]:
+                return Resp({"data": {"findStore": {"store": {"name": "District 5", "storeSource": {"source_code": "40"}}}}})
+            return Resp({"data": {"products": {"items": [{"name": "Juhayna Skimmed Milk - 1 Liter", "sku": "1",
+                         "url_key": "juhayna-skimmed-milk-1-liter", "stock_status": "IN_STOCK", "small_image": {"url": "https://img/1.jpg"},
+                         "price_range": {"minimum_price": {"final_price": {"value": 55.45}, "regular_price": {"value": 55.45}}}}]}}})
+
+    a = seoudi((30.0074, 31.4913))
+    http = Http()
+    a._http = lambda: http
+    offers = await a.search("juhayna skimmed milk")
+    await a.search("rice")
+    assert [c[1] for c in http.calls] == [{}, {"sourcecode": "40"}, {"sourcecode": "40"}]  # looked up once
+    assert a.branch == "District 5" and offers[0].image == "https://img/1.jpg"
+    assert offers[0].url == "https://seoudisupermarket.com/en/juhayna-skimmed-milk-1-liter"
