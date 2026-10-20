@@ -59,14 +59,20 @@ min_order = 0
 verified = false
 
 [amazon_now]
-# Amazon's quick delivery, inside amazon.eg. Read in Shopping Chrome; not verified yet.
+# Amazon's quick delivery, inside amazon.eg. Read in Shopping Chrome.
+# Fees from your checkout (2026-10-20): service fee 4%, at least EGP 5, at most EGP 10;
+# delivery EGP 25, free on orders of EGP 150 or more. Your checkout showed the service fee
+# as free on that order; if it is always free for you (Prime), set service_fee_pct = 0.
 label = "Amazon Now"
 status = "browser"
 enabled = true
-delivery_fee = 0
-service_fee_pct = 0
+delivery_fee = 25
+free_delivery_over = 150
+service_fee_pct = 4
+service_fee_min = 5
+service_fee_max = 10
 min_order = 0
-verified = false
+verified = true
 
 [noon_minutes]
 # noon's quick delivery (minutes.noon.com). Read in Shopping Chrome; not verified yet.

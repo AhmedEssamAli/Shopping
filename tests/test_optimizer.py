@@ -92,3 +92,12 @@ def test_minimum_move_never_starves_the_other_shop():
     fees = {"A": PlatformFees(min_order=100), "B": PlatformFees(min_order=100)}
     best = optimise(matches, 3, fees)[0]
     assert best.platforms == ("A", "B") and round(best.total, 2) == 200.0
+
+
+def test_service_fee_floor_and_cap_and_free_delivery():
+    from shopper.config import REPO_ROOT, load_platforms
+    f = load_platforms(REPO_ROOT / "config" / "platforms.toml")["amazon_now"].fees
+    assert f.verified
+    assert f.fees_for(56.69) == 25 + 5          # 4% is 2.27: the EGP 5 floor
+    assert round(f.fees_for(200), 2) == 8.0     # free delivery from 150; 4% of 200
+    assert f.fees_for(400) == 10                # capped at EGP 10
