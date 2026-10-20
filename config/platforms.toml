@@ -58,6 +58,26 @@ service_fee_pct = 0
 min_order = 0
 verified = false
 
+[amazon_now]
+# Amazon's quick delivery, inside amazon.eg. Read in Shopping Chrome; not verified yet.
+label = "Amazon Now"
+status = "browser"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[noon_minutes]
+# noon's quick delivery (minutes.noon.com). Read in Shopping Chrome; not verified yet.
+label = "noon Minutes"
+status = "browser"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
 [amazon_eg]
 label = "Amazon.eg"
 status = "browser"

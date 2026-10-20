@@ -8,6 +8,7 @@ from .instashop import InstashopAdapter
 from .magento import gourmet, hyperone, seoudi, spinneys
 from .metro import MetroAdapter
 from .noon import NoonAdapter
+from .quick import amazon_now, noon_minutes
 from .pending import HOME_URLS, PendingAdapter
 from .talabat import TalabatShopAdapter, list_shops
 
@@ -33,6 +34,8 @@ def build_adapters(settings: Settings, session: BrowserSession | None) -> dict[s
     if session is not None:
         out["amazon_eg"] = AmazonEgAdapter(session)
         out["noon"] = NoonAdapter(session)
+        out["noon_minutes"] = noon_minutes(session)
+        out["amazon_now"] = amazon_now(session)
         for name, p in settings.platforms.items():
             if p.options.get("instashop_shop"):
                 out[name] = InstashopAdapter(name, p.label, p.options["slug"], session)

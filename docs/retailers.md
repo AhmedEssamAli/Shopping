@@ -13,13 +13,13 @@ Surveyed on 2026-10-20 for New Cairo / 5th Settlement. Probes ran from a cloud s
 | Amazon.eg | Shopping Chrome on the home PC | Live, with cart push |
 | noon | Shopping Chrome | Live search; cart push presses the product page button |
 | Instashop: Mahmoud ElFar (Mivida) | Shopping Chrome, results popup | Live search |
+| **noon Minutes** (minutes.noon.com) | Shopping Chrome; search URL, then the page's search box | **New, built, not verified.** The cloud gets a bot check. A failed search saves the page for tuning |
+| **Amazon Now** (amazon.eg tez browse, `qcbrand=sAuWWBROaG`) | Shopping Chrome; the page's search box, Amazon result cards | **New, built, not verified.** Same as noon Minutes |
 
 ## Missing, and the next step for each
 
 | Shop | What is known | Route | Next step | Owner |
 |---|---|---|---|---|
-| Amazon Now (20-minute groceries) | Launched July 2026 in "selected areas" of Cairo (source: Ahram Online). New Cairo coverage unknown | Inside amazon.eg, if it shows on the web | On the home PC, open amazon.eg with your address and look for Amazon Now items or a filter. Send a `shopper capture amazon_eg` of a search if it shows | You, then Claude |
-| noon Minutes (15-minute essentials) | Only a LinkedIn post says it is "expanding across Cairo"; no Egypt launch date found | Inside noon.com, if it shows on the web | Same check on noon.com/egypt-en. If Minutes items show, send a capture | You, then Claude |
 | Carrefour Egypt (own site) | Sends an empty page to scripts (bot protection) | Shopping Chrome, like noon | Low priority: Carrefour already comes through talabat. Add only if its own prices differ | Claude, on request |
 | Kheir Zaman, Zahran, Mahmoud ElFar (Madinaty) | On talabat in some branches | talabat, already built | Run `shopper talabat-shops` on the home PC. If any of them deliver to you, paste its line into `shops = [...]` | You |
 | More Instashop shops | Instashop lists many local supermarkets | Instashop, already built | Tell me the shop page names you use (the part after `/client/` in the link) | You |
