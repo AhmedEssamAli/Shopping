@@ -23,7 +23,8 @@ def parse_watch(text: str) -> tuple[str, float | None]:
 
 async def best_exact(app, query: str) -> Match | None:
     """Cheapest exact match for one unit of ``query`` across the enabled platforms."""
-    result = await compare([ItemRequest(query, 1)], app.settings, app.adapters, max_orders=1)
+    result = await compare([ItemRequest(query, 1)], app.settings, app.adapters, max_orders=1,
+                           memory=getattr(app, "memory", None))
     exact = [m for m in result.items[0].matches.values() if m and m.exact]
     return min(exact, key=lambda m: m.offer.price) if exact else None
 

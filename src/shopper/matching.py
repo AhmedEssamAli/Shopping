@@ -53,14 +53,15 @@ def _same_size(a: Size, b: Size) -> bool:
     return a.unit == b.unit and abs(a.total - b.total) <= 0.02 * max(a.total, b.total)
 
 
-def score(request: ItemRequest, offer: Offer) -> Match:
+def score(request: ItemRequest, offer: Offer, avoid: frozenset[str] = frozenset()) -> Match:
+    """``avoid``: extra words that block an exact match, learned from your choices."""
     req = tokens(request.query)
     off = tokens(offer.name)
     if not req:
         return Match(request, offer, 0.0, False)
     covered = sum(has_word(w, off) for w in req) / len(req)
     extras = [w for w in off if not has_word(w, req)]
-    variant_extras = [w for w in extras if w in VARIANT_WORDS]
+    variant_extras = [w for w in extras if w in VARIANT_WORDS or w in avoid]
 
     s = covered * 100 - 4 * len(extras) - 10 * len(variant_extras)
     want, got = request.size, offer.size
@@ -78,13 +79,13 @@ def score(request: ItemRequest, offer: Offer) -> Match:
     return Match(request, offer, max(s, 0.0), exact)
 
 
-def best_match(request: ItemRequest, offers: list[Offer]) -> Match | None:
+def best_match(request: ItemRequest, offers: list[Offer], avoid: frozenset[str] = frozenset()) -> Match | None:
     """Best acceptable in-stock offer from one platform.
 
     Any exact match beats every close one, and the cheapest exact wins. Without an exact
     match, the closest-scoring offer wins, cheapest among equals.
     """
-    cands = [m for m in (score(request, o) for o in offers if o.in_stock) if m.score >= ACCEPT_SCORE]
+    cands = [m for m in (score(request, o, avoid) for o in offers if o.in_stock) if m.score >= ACCEPT_SCORE]
     if not cands:
         return None
     return min(cands, key=lambda m: (0, 0, m.offer.price) if m.exact else (1, -round(m.score, -1), m.offer.price))

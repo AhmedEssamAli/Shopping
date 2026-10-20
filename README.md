@@ -100,6 +100,20 @@ Run `scripts\windows\install-autostart.cmd` once. Also put a shortcut to `script
 
 Every price carries the time it was fetched. Always check the total in the platform's app before you pay. shopper never checks out or pays.
 
+## Choose once, shopper remembers
+
+A short line like "Nescafe classic 200g" fits several products: a jar, a pouch and a sachet are all Nescafe Classic 200 g. shopper no longer picks one for you without saying so.
+
+1. **Cards.** The comparison page groups what it found into one card per distinct product: size, pack type (jar, pouch, sachet, ...) and any variant word. Each card lists the platforms that sell it and the price per kg or L. When more than one card fits, the plan says **Not final** and the line says **choose your product**.
+2. **This one.** Press it on the card you mean. The plan is recomputed at once, from the prices already fetched, with no new search. Next time you send the same line, in any spelling ("NESCAFÉ Classic 200 gm" counts as the same), that product wins on the platforms where you chose it. Other platforms are searched and matched with your choice added ("... 200g jar"), so a pouch no longer counts as your jar.
+3. **not this.** Press it under any price in the table. That listing never comes back for that line.
+4. **change.** Press it next to "your product" to choose again.
+5. **Words you avoid.** When you pass over a pack or variant word twice and never choose it (for example "sachet"), it stops counting as an exact match on every line that does not ask for it. Choosing it once undoes this.
+
+Why memory and not a trained model: big retailers learn ranking from millions of clicks. One household makes a few dozen choices a month, which is too few to train on. Each choice is a direct answer, so storing it is exact from the first pick. shopper still uses each retailer's own search to find the listings.
+
+The buttons work on comparisons made since `shopper serve` last started. Older pages say "Compare again".
+
 ## Adding a pending platform
 
 Run this on the home PC:
@@ -115,6 +129,7 @@ src/shopper/
   adapters/        magento.py (Gourmet, Seoudi, Spinneys) · talabat.py (any talabat shop) · noon.py · amazon_eg.py · pending.py
   units.py         size and pack parsing
   matching.py      exact / close match rules
+  memory.py        your picks, rejects and avoided words
   optimizer.py     landed-cost basket split
   service.py       parallel search, match, optimise
   parsing.py       list parsing (local, or Claude for Arabic and free text)
@@ -122,7 +137,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · pwa.py (phone app) · cli.py · store.py (SQLite price history)
-tests/             90 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             96 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

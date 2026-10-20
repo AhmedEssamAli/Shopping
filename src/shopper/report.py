@@ -59,6 +59,8 @@ def _plan_lines(result: CompareResult, prop: Proposal, settings: Settings) -> li
             if m.offer.platform != platform:
                 continue
             tag = "" if m.exact else " [close match]"
+            if result.items[i].needs_pick:
+                tag += " [choose your product in the table]"
             lines.append(f"  • {m.request.qty} × {m.offer.name} @ {m.offer.price:,.2f}{tag}\n    {m.offer.url}")
     return lines
 
@@ -72,6 +74,10 @@ def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     else:
         names = " + ".join(label(settings, p) for p in best.platforms)
         out.append(f"\nBEST PLAN: {names} — {_egp(best.total)}")
+        pending = [r.request.query for r in result.items if r.needs_pick]
+        if pending:
+            out.append(f"Not final: several products fit {len(pending)} line(s). Choose yours in the Full table: "
+                       + "; ".join(pending))
         out += _plan_lines(result, best, settings)
         for platform, link in cart_links(result, best, adapters).items():
             out.append(f"  Cart link ({label(settings, platform)}): {link}")
@@ -110,6 +116,10 @@ a{color:inherit}.plan{background:var(--card);border:1px solid var(--line);border
 .plan b{font-variant-numeric:tabular-nums}ul{margin:6px 0 0;padding-left:18px}.warn{color:var(--close)}
 textarea{width:100%;min-height:160px;font:inherit;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
 button{font:inherit;padding:8px 16px;border-radius:8px;border:1px solid var(--line);background:var(--fg);color:var(--bg);cursor:pointer}
+form.inline{display:inline;margin:0}button.link{background:none;border:0;padding:2px 0;color:var(--muted);text-decoration:underline;font-size:12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin:8px 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}.card ul{font-size:13px;margin-bottom:8px}
+h3{font-size:15px;margin:16px 0 4px}details{margin:8px 0}summary{cursor:pointer;color:var(--muted)}
 """
 
 
@@ -133,11 +143,39 @@ def _plan_html(result: CompareResult, prop: Proposal, settings: Settings, adapte
     return f"<div class=plan><div>{title}: <b>{_egp(prop.total)}</b></div>{''.join(rows)}{links}{missing}</div>"
 
 
-def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapter]) -> str:
+def _button(action: str | None, q: str, text: str, fields: dict, cls: str = "link") -> str:
+    if not action:
+        return ""
+    hidden = "".join(f"<input type=hidden name={k} value='{escape(str(v))}'>" for k, v in fields.items())
+    return f"<form method=post action='{escape(action)}{q}' class=inline>{hidden}<button class={cls}>{escape(text)}</button></form>"
+
+
+def _unit(o) -> str:
+    return f"{o.unit_price:,.1f}/{_per(o.size.unit)}" if o.unit_price else ""
+
+
+def _cards_html(result: CompareResult, settings: Settings, i: int, base: str | None, q: str) -> str:
+    r = result.items[i]
+    cards = []
+    for j, c in enumerate(r.cards):
+        best = c.cheapest()
+        listings = "".join(f"<li>{escape(label(settings, p))}: <a href='{escape(o.url)}' target='_blank' rel='noopener'>"
+                           f"{escape(o.name)}</a> · {o.price:,.2f}</li>" for p, o in c.per_platform().items())
+        tag = "" if c.exact else " <span class=close>other size or wording</span>"
+        cards.append(f"<div class=card><div><b>{escape(c.label)}</b>{tag}</div>"
+                     f"<div class=price>from {best.price:,.2f} <span class=muted>{_unit(best)}</span></div><ul>{listings}</ul>"
+                     f"{_button(base and base + '/pick', q, 'This one', {'item': i, 'card': j}, 'pick')}</div>")
+    return f"<div class=cards>{''.join(cards)}</div>"
+
+
+def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapter],
+            base: str | None = None, token: str | None = None, learned: dict[str, int] | None = None) -> str:
+    """``base`` (like "/r/<id>") turns on the pick / not this / change buttons."""
+    q = f"?t={escape(token)}" if token else ""
     plats = result.platforms
     head = "".join(f"<th>{escape(label(settings, p))}</th>" for p in plats)
     body_rows = []
-    for r in result.items:
+    for i, r in enumerate(result.items):
         found = [m for m in r.matches.values() if m]
         pool = [m for m in found if m.exact] or found  # a cheaper wrong size is not "cheapest"
         cheapest = min(pool, key=lambda m: m.offer.price).offer.platform if pool else None
@@ -148,14 +186,24 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
                 cells.append("<td class=muted>—</td>")
                 continue
             o = m.offer
-            unit = f"<div class=muted>{o.unit_price:,.1f}/{'L' if o.size.unit == 'ml' else 'kg' if o.size.unit == 'g' else 'pc'}</div>" if o.unit_price else ""
+            unit = f"<div class=muted>{_unit(o)}</div>" if o.unit_price else ""
             deal = f" <s class=muted>{o.regular_price:,.2f}</s>" if o.on_deal else ""
-            close = "" if m.exact else "<div class=close>close match</div>"
+            close = "<div class=muted>your pick</div>" if m.pinned else "" if m.exact else "<div class=close>close match</div>"
+            no = "" if m.pinned else _button(base and base + "/reject", q, "not this", {"item": i, "platform": p})
             cells.append(f"<td class='{'best' if p == cheapest else ''}'><div class=price>{o.price:,.2f}{deal}</div>"
-                         f"<div class=name><a href='{escape(o.url)}' target='_blank' rel='noopener'>{escape(o.name)}</a></div>{unit}{close}</td>")
-        body_rows.append(f"<tr><td><b>{r.request.qty} ×</b> {escape(r.request.query)}</td>{''.join(cells)}</tr>")
+                         f"<div class=name><a href='{escape(o.url)}' target='_blank' rel='noopener'>{escape(o.name)}</a></div>{unit}{close}{no}</td>")
+        state = ""
+        if r.pinned:
+            state = "<div class=muted>your product</div>" + _button(base and base + "/forget", q, "change", {"item": i})
+        elif r.needs_pick:
+            state = f"<div class=warn><a href='#pick-{i}'>choose your product</a></div>"
+        body_rows.append(f"<tr><td><b>{r.request.qty} ×</b> {escape(r.request.query)}{state}</td>{''.join(cells)}</tr>")
 
     plans = ""
+    pending = [i for i, r in enumerate(result.items) if r.needs_pick]
+    if pending:
+        plans += (f"<p class=warn>Not final: several products fit {len(pending)} line(s). Choose yours below; "
+                  "shopper remembers it for next time.</p>")
     if result.best:
         plans += _plan_html(result, result.best, settings, adapters, "Best plan")
         if result.single and result.single is not result.best:
@@ -167,23 +215,35 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
         plans += "<div class=plan><div>Better-value packs</div><ul>" + "".join(
             f"<li>{escape(r.request.query)}: <a href='{escape(r.tip.offer.url)}' target='_blank' rel='noopener'>"
             f"{escape(line)}</a></li>" for r, line in tips) + "</ul></div>"
+    picks = ""
+    for i, r in enumerate(result.items):
+        if not r.cards or r.pinned:
+            continue
+        cards = _cards_html(result, settings, i, base, q)
+        title = f"<h3 id=pick-{i}>{escape(r.request.query)}</h3>"
+        picks += (title + cards) if r.needs_pick else (
+            f"<details id=pick-{i}><summary>{escape(r.request.query)}: wrong product? Choose</summary>{cards}</details>")
+    if picks:
+        picks = "<h2>Choose your products</h2>" + picks
     notes = []
     if result.unverified_fees:
         notes.append("Fees not verified (counted as 0): " + ", ".join(label(settings, p) for p in result.unverified_fees))
     notes += [f"{label(settings, p)}: {e}" for p, e in result.errors.items()]
     notes += [f"{label(settings, p)} prices are from its catalogue snapshot of {t}." for p, t in snapshot_ages(result).items()]
     notes_html = "".join(f"<p class=warn>{escape(n)}</p>" for n in notes)
+    memo = (f"<p class=muted>Learned so far: {learned['lines']} chosen products, {learned['rejects']} rejected listings, "
+            f"{learned['avoid']} avoided words.</p>") if learned else ""
     when = result.created_at.astimezone().strftime("%Y-%m-%d %H:%M")
     body = (f"<h1>Basket comparison</h1><div class=muted>{escape(settings.area_name)} · prices fetched {when} · "
             f"green = cheapest exact match per item · check the total in the app before paying</div>"
-            f"<h2>Proposal</h2>{plans}{notes_html}<h2>All prices</h2>"
-            f"<div class=wrap><table><thead><tr><th>Item</th>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody></table></div>")
+            f"<h2>Proposal</h2>{plans}{notes_html}{picks}<h2>All prices</h2>"
+            f"<div class=wrap><table><thead><tr><th>Item</th>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody></table></div>{memo}")
     return page("Basket comparison", body)
 
 
 def debug_text(result: CompareResult, settings: Settings, top: int = 3) -> str:
     """Per platform: how many offers came back and how the best few scored."""
-    from .matching import score
+    from .matching import ACCEPT_SCORE, score
 
     out = []
     for r in result.items:
@@ -195,5 +255,6 @@ def debug_text(result: CompareResult, settings: Settings, top: int = 3) -> str:
                 continue
             ranked = sorted((score(r.request, o) for o in offers), key=lambda m: -m.score)[:top]
             out.append(f"  {label(settings, p)}: {len(offers)} offers")
-            out += [f"     {m.score:5.1f} {'EXACT' if m.exact else 'close'} {m.offer.price:>9,.2f}  {m.offer.name}" for m in ranked]
+            out += [f"     {m.score:5.1f} {'EXACT' if m.exact else 'close' if m.score >= ACCEPT_SCORE else 'below cut-off'}"
+                    f" {m.offer.price:>9,.2f}  {m.offer.name}" for m in ranked]
     return "\n".join(out)

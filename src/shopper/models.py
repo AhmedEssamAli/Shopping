@@ -58,6 +58,7 @@ class Match:
     offer: Offer
     score: float  # 0-100
     exact: bool  # name covers the request and the size agrees
+    pinned: bool = False  # the product you chose for this line before
 
     @property
     def line_total(self) -> float:

@@ -1,0 +1,100 @@
+"""Option C: pick the product once; shopper remembers it and learns the words you avoid."""
+from fastapi.testclient import TestClient
+
+from shopper.app import App
+from shopper.config import PlatformConfig, Settings
+from shopper.memory import Memory, product_cards, request_key
+from shopper.models import ItemRequest, Offer, PlatformFees
+from shopper.web import create_app
+from test_service import Fake
+
+CATALOGUE = {
+    "noon": [("Nescafe Classic Sachet 200grams", 341.0), ("Nescafe Classic Jar 190grams", 449.95)],
+    "amazon": [("Nescafe Classic Instant Coffee Pouch 200g", 261.99)],
+    "gourmet": [("Nestlé Nescafé Classic Instant Coffee Jar - 200gm", 300.0)],
+    "seoudi": [("Nescafe Classic Coffee Jar 200g", 310.0)],
+}
+COFFEE = ItemRequest("Nescafe classic 200g")
+
+
+def core(tmp_path, catalogue=CATALOGUE):
+    plats = {n: PlatformConfig(n, n.title(), "live", True, PlatformFees()) for n in catalogue}
+    s = Settings(home=tmp_path, platforms=plats)
+    s.web_token = "k"
+    app = App(s)
+    app.adapters = {n: Fake(n, items) for n, items in catalogue.items()}
+    return app
+
+
+def offers():
+    return [Offer(p, n, price, f"https://{p}/{i}") for p, items in CATALOGUE.items() for i, (n, price) in enumerate(items)]
+
+
+def test_pack_types_are_separate_products():
+    cards = product_cards(COFFEE, offers())
+    exact = {c.label for c in cards if c.exact}
+    assert exact == {"200g · sachet", "200g · pouch", "200g · jar"}
+    jar = next(c for c in cards if c.label == "200g · jar")
+    assert set(jar.per_platform()) == {"gourmet", "seoudi"}
+
+
+def test_key_ignores_case_accents_and_size_spelling():
+    assert request_key(ItemRequest("NESCAFÉ Classic 200 gm")) == request_key(COFFEE)
+
+
+async def test_pick_once_then_the_plan_uses_your_product(tmp_path):
+    app = core(tmp_path)
+    result, text, rid = await app.run([COFFEE])
+    assert result.items[0].needs_pick and "Not final" in text
+    assert result.best.assignments[0].offer.price == 261.99  # cheapest exact today: the pouch
+
+    jar = next(j for j, c in enumerate(result.items[0].cards) if c.label == "200g · jar")
+    assert app.feedback(rid, "pick", 0, card=jar)
+    m = result.best.assignments[0]
+    assert m.offer.name.startswith("Nestlé") and m.pinned and not result.items[0].needs_pick
+    pouch = result.items[0].matches["amazon"]
+    assert pouch is None or not pouch.exact  # a pouch is not your jar
+
+    again, text2, _ = await app.run([ItemRequest("nescafe CLASSIC 200 gm", 2)])
+    assert again.items[0].pinned and "Not final" not in text2
+    assert again.best.assignments[0].offer.price == 300.0
+
+
+async def test_passed_over_pack_words_become_avoided(tmp_path):
+    app = core(tmp_path)
+    mem: Memory = app.memory
+    result, _, rid = await app.run([COFFEE])
+    app.feedback(rid, "pick", 0, card=next(j for j, c in enumerate(result.items[0].cards) if c.label == "200g · jar"))
+    assert "sachet" not in mem.avoid_words()  # once is not a habit
+    tea = {"noon": [("Lipton Yellow Label Tea Sachet 100 bags", 120.0), ("Lipton Yellow Label Tea Box 100 bags", 130.0)]}
+    app2 = core(tmp_path / "x", tea)
+    app2.memory = mem  # same household memory
+    r2, _, rid2 = await app2.run([ItemRequest("Lipton yellow label tea 100 bags")])
+    app2.feedback(rid2, "pick", 0, card=next(j for j, c in enumerate(r2.items[0].cards) if "box" in c.forms))
+    assert "sachet" in mem.avoid_words()
+    r3, _, _ = await app2.run([ItemRequest("Lipton tea 100 bags")])  # a new line, never picked
+    assert not r3.items[0].needs_pick and "Box" in r3.items[0].matches["noon"].offer.name
+
+
+async def test_not_this_removes_a_listing_for_that_line(tmp_path):
+    app = core(tmp_path)
+    result, _, rid = await app.run([COFFEE])
+    assert result.items[0].matches["noon"].offer.name == "Nescafe Classic Sachet 200grams"
+    assert app.feedback(rid, "reject", 0, platform="noon")
+    assert result.items[0].matches["noon"] is None or "Sachet" not in result.items[0].matches["noon"].offer.name
+    again, _, _ = await app.run([COFFEE])
+    assert again.items[0].matches["noon"] is None or "Sachet" not in again.items[0].matches["noon"].offer.name
+
+
+def test_web_buttons_pick_and_change(tmp_path):
+    app = core(tmp_path)
+    client = TestClient(create_app(app))
+    page = client.post("/compare?t=k", data={"items": "Nescafe classic 200g", "max_orders": 2}, follow_redirects=True)
+    assert "Choose your products" in page.text and "This one" in page.text and "not this" in page.text
+    rid = page.url.path.split("/")[-1]
+    picked = client.post(f"/r/{rid}/pick?t=k", data={"item": 0, "card": 0}, follow_redirects=True)
+    assert "your product" in picked.text and "Learned so far: 1 chosen products" in picked.text
+    changed = client.post(f"/r/{rid}/forget?t=k", data={"item": 0}, follow_redirects=True)
+    assert "Choose your products" in changed.text
+    assert client.post(f"/r/{rid}/pick", data={"item": 0, "card": 0}).status_code == 404  # token required
+    assert client.post(f"/r/{rid}/delete?t=k", data={"item": 0}).status_code == 404

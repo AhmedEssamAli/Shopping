@@ -60,6 +60,10 @@ class Store:
         self.db.commit()
         return rid
 
+    def update_result(self, rid: str, html: str) -> None:
+        self.db.execute("UPDATE results SET html=? WHERE id=?", (html, rid))
+        self.db.commit()
+
     def get_result(self, rid: str) -> str | None:
         row = self.db.execute("SELECT html FROM results WHERE id=?", (rid,)).fetchone()
         return row[0] if row else None

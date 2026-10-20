@@ -70,6 +70,16 @@ def create_app(core: App) -> FastAPI:
                 f"<p><a href='/r/{escape(rid)}{q(t)}'>Back to the comparison</a> · <a href='/{q(t)}'>New basket</a></p>")
         return pwa.add_head(page("Cart push", body), t)
 
+    @api.post("/r/{rid}/{action}")
+    async def feedback(rid: str, action: str, item: int = Form(...), card: int | None = Form(None),
+                       platform: str | None = Form(None), t: str | None = Query(None)):
+        check(t)
+        if action not in ("pick", "reject", "forget"):
+            raise HTTPException(status_code=404)
+        if not core.feedback(rid, action, item, card, platform):
+            raise HTTPException(status_code=404, detail="Compare again; this result is no longer in memory")
+        return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
+
     @api.get("/manifest.webmanifest")
     async def manifest(t: str | None = Query(None)):
         check(t)  # the manifest carries the token in start_url
