@@ -81,6 +81,8 @@ def load_platforms(path: Path) -> dict[str, PlatformConfig]:
             verified=bool(d.get("verified", False)),
             service_fee_min=float(d.get("service_fee_min", 0)),
             service_fee_max=float(d["service_fee_max"]) if d.get("service_fee_max") is not None else None,
+            small_order_fee=float(d.get("small_order_fee", 0)),
+            small_order_below=float(d["small_order_below"]) if d.get("small_order_below") is not None else None,
         )
         out[name] = PlatformConfig(name, d.get("label", name), d.get("status", "pending"), bool(d.get("enabled", False)),
                                    fees, dict(d))

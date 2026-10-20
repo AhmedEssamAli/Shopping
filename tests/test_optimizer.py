@@ -101,3 +101,12 @@ def test_service_fee_floor_and_cap_and_free_delivery():
     assert f.fees_for(56.69) == 25 + 5          # 4% is 2.27: the EGP 5 floor
     assert round(f.fees_for(200), 2) == 8.0     # free delivery from 150; 4% of 200
     assert f.fees_for(400) == 10                # capped at EGP 10
+
+
+def test_small_order_fee():
+    from shopper.config import REPO_ROOT, load_platforms
+    from shopper.models import PlatformFees
+    f = load_platforms(REPO_ROOT / "config" / "platforms.toml")["noon_minutes"].fees
+    assert f.fees_for(86.75) == 30  # your checkout: delivery 25 + small order fee 5
+    known = PlatformFees(delivery_fee=25, small_order_fee=5, small_order_below=100)
+    assert known.fees_for(86.75) == 30 and known.fees_for(120) == 25

@@ -75,14 +75,19 @@ min_order = 0
 verified = true
 
 [noon_minutes]
-# noon's quick delivery (minutes.noon.com). Read in Shopping Chrome; not verified yet.
+# noon's quick delivery (minutes.noon.com). Read in Shopping Chrome.
+# Fees from your checkout (2026-10-20, subtotal EGP 86.75): delivery EGP 25 and a small order
+# fee of EGP 5. Not known yet: the order size that removes the small order fee (set
+# small_order_below) and whether delivery becomes free above some amount (free_delivery_over).
+# Until then both are charged on every order.
 label = "noon Minutes"
 status = "browser"
 enabled = true
-delivery_fee = 0
+delivery_fee = 25
 service_fee_pct = 0
+small_order_fee = 5
 min_order = 0
-verified = false
+verified = true
 
 [amazon_eg]
 label = "Amazon.eg"

@@ -75,6 +75,8 @@ class PlatformFees:
     verified: bool = False  # True only after you copy the numbers from a real checkout
     service_fee_min: float = 0.0  # the percentage fee is kept between these (Amazon Now: 4%, EGP 5-10)
     service_fee_max: float | None = None
+    small_order_fee: float = 0.0  # charged below small_order_below (noon Minutes: EGP 5)
+    small_order_below: float | None = None  # None: the limit is not known, so it is charged on every order
 
     def fees_for(self, subtotal: float) -> float:
         delivery = 0.0 if self.free_delivery_over is not None and subtotal >= self.free_delivery_over else self.delivery_fee
@@ -83,7 +85,8 @@ class PlatformFees:
             service = max(service, self.service_fee_min)
             if self.service_fee_max is not None:
                 service = min(service, self.service_fee_max)
-        return delivery + service
+        small = self.small_order_fee if self.small_order_below is None or subtotal < self.small_order_below else 0.0
+        return delivery + service + small
 
 
 @dataclass
