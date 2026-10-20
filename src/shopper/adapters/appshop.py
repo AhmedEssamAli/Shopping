@@ -1,15 +1,21 @@
 """Shops that live only in a phone app (Breadfast, Rabbit): prices you type in.
 
-Their websites carry no catalogue and their apps' data is not open, so shopper keeps a
-small price book instead. You send what the app shows ("Juhayna skimmed milk 1L = 54.95")
-in Telegram or on the home page; comparisons then include those prices, labelled with
-their age. Prices older than MAX_AGE_DAYS are left out, because app prices move.
+Their websites carry no catalogue (checked again 2026-10-20: breadfast.com and
+rabbitmart.com link only to the app stores) and their apps' data is not open, so shopper
+keeps a small price book instead. You give it what the app shows, two ways:
+- type lines ("Juhayna skimmed milk 1L = 54.95") in Telegram or on the home page, or
+- send a screenshot of the app's search or category screen; Claude reads each product's
+  name, size and price from the picture (direct Anthropic API, ANTHROPIC_API_KEY).
+Comparisons then include those prices, labelled with their age. Prices older than
+MAX_AGE_DAYS are left out, because app prices move.
 """
 from __future__ import annotations
 
 import re
 import sqlite3
 from datetime import datetime, timedelta
+
+from pydantic import BaseModel, Field
 
 from ..matching import has_word, tokens
 from ..models import Offer, now_utc
@@ -33,6 +39,48 @@ def parse_prices(text: str) -> list[tuple[str, float]]:
         if m:
             out.append((" ".join(m.group(1).split()), float(m.group(2).replace(",", "."))))
     return out
+
+
+class _Seen(BaseModel):
+    name: str = Field(description="Product name as shown, with brand, type and size: 'Juhayna Skimmed Milk 1L'")
+    price: float = Field(description="Price you pay now in EGP (the current price, not a crossed-out one)")
+
+
+class _Screen(BaseModel):
+    products: list[_Seen]
+
+
+MODEL = "claude-opus-5-5"
+_READ = ("This is a screenshot of an Egyptian grocery app ({shop}). List every product whose name and price are both "
+         "fully visible. Copy the name as shown, adding the size or pack shown under it (1L, 6 x 1L, 500g). Use the "
+         "current price in EGP; ignore crossed-out prices, delivery fees, cart totals and banners. Skip anything cut off. "
+         "If the screen shows no products with prices, return an empty list.")
+
+
+def read_screenshot(image: bytes, media_type: str, shop: str, api_key: str) -> list[tuple[str, float]]:
+    """Names and prices from a screenshot of the app, read by Claude. Raises when no key is set."""
+    import base64
+
+    import anthropic
+
+    if not api_key:
+        raise RuntimeError("Reading screenshots needs ANTHROPIC_API_KEY in .env. You can type the prices instead.")
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.beta.messages.parse(
+        model=MODEL,
+        max_tokens=8000,
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",  # a declined request is retried on a fallback model in the same call
+        messages=[{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": media_type,
+                                         "data": base64.standard_b64encode(image).decode()}},
+            {"type": "text", "text": _READ.format(shop=shop)}]}],
+        output_format=_Screen,
+    )
+    if resp.stop_reason == "refusal" or resp.parsed_output is None:
+        raise RuntimeError(f"Claude could not read the screenshot (stop_reason={resp.stop_reason}).")
+    return [(" ".join(p.name.split()), round(p.price, 2)) for p in resp.parsed_output.products
+            if p.name.strip() and 0 < p.price < 100000]
 
 
 class PriceBook:

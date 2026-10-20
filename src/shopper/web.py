@@ -9,7 +9,7 @@ from datetime import datetime
 from html import escape
 from urllib.parse import quote
 
-from fastapi import FastAPI, Form, HTTPException, Query
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -70,7 +70,7 @@ def create_app(core: App) -> FastAPI:
     def q(t: str | None) -> str:
         return f"?t={quote(t)}" if t else ""
 
-    STATUS = {"live": "Live", "browser": "Through Shopping Chrome", "app": "From the app: prices you type in",
+    STATUS = {"live": "Live", "browser": "Through Shopping Chrome", "app": "From the app: screenshots or typed prices",
               "pending": "Not added yet"}
 
     def app_prices_html(t: str | None) -> str:
@@ -89,8 +89,15 @@ def create_app(core: App) -> FastAPI:
                 f"the app shows, one per line, like <code>Juhayna skimmed milk 1L = 54.95</code>. Comparisons use these "
                 f"prices for 30 days.</p><p><label>Shop <select name=shop>{options}</select></label></p>"
                 f"<textarea name=lines style='min-height:110px' required></textarea>"
-                f"<div class=actions><button>Save prices</button></div>"
-                + (f"<ul class=list style='margin-top:14px'>{rows}</ul>" if rows else "") + "</form>")
+                f"<div class=actions><button>Save prices</button></div></form>"
+                f"<form method=post action='/prices/screenshot{q(t)}' enctype=multipart/form-data class=panel>"
+                f"<p class='muted small' style='margin:0 0 8px'><b>Faster:</b> take a screenshot of the app's search "
+                f"results and upload it. shopper reads each product and price (Claude, needs ANTHROPIC_API_KEY). "
+                f"In Telegram, just send the screenshot with the caption <code>breadfast</code> or <code>rabbit</code>.</p>"
+                f"<p><label>Shop <select name=shop>{options}</select></label></p>"
+                f"<p><input type=file name=image accept='image/*' required></p>"
+                f"<div class=actions><button>Read the screenshot</button></div></form>"
+                + (f"<div class=panel><ul class=list>{rows}</ul></div>" if rows else ""))
 
     async def areas_html(t: str | None) -> str:
         """Choose the district for shops that price by branch (Seoudi), from the shop's own area list."""
@@ -140,7 +147,7 @@ def create_app(core: App) -> FastAPI:
                            for line, words in chosen) + "</div>") if chosen else ""
         units = "".join(f"<option>{u}</option>" for u in ("", "L", "ml", "kg", "g"))
         row = ("<div class=itemrow>"
-               "<label>Item <b>*</b><input name=item placeholder='milk' autocomplete=off></label>"
+               "<label><span>Item <b>*</b></span><input name=item placeholder='milk' autocomplete=off></label>"
                "<label>Brand<input name=brand list=brands placeholder='any brand' autocomplete=off></label>"
                "<label>Type<input name=kind list=types placeholder='any type' autocomplete=off></label>"
                f"<label>Size of one<span class=sizebox><input name=amount inputmode=decimal placeholder='1'>"
@@ -165,7 +172,7 @@ def create_app(core: App) -> FastAPI:
                 f"<h2 style='margin:0 0 6px'>What do you want to buy?</h2>"
                 f"<p class='muted small' style='margin:0 0 10px'>One item per row. Only the item is required. Every field "
                 f"you fill must match; every field you leave empty is open.</p>"
-                f"<div id=rows>{row * 3}</div>{lists}<button type=button class=quiet id=addrow>Add another item</button>{guide}"
+                f"<div id=rows>{row * 2}</div>{lists}<button type=button class=quiet id=addrow>Add another item</button>{guide}"
                 f"<details class=choose{' open' if chosen else ''}><summary>Or paste a list</summary>"
                 f"<p class='muted small' style='margin:8px 0'>One item per line, quantity first or last: "
                 f"<code>2 Juhayna full cream milk 1L</code> or <code>rice 5kg x1</code>. Arabic works too.</p>"
@@ -208,7 +215,31 @@ def create_app(core: App) -> FastAPI:
                   "document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{"
                   "const t=document.getElementById('items');t.value=(t.value.trim()?t.value.trim()+'\\n':'')+b.dataset.line;"
                   "t.focus();b.disabled=true}))</script>")
-        return pwa.add_head(page("Compare a basket", form + saved + past + app_prices_html(t) + await areas_html(t) + shops_html() + script, header), t)
+        return pwa.add_head(page("Compare a basket", form + saved + past + await areas_html(t) + app_prices_html(t) + shops_html() + script, header), t)
+
+    @api.post("/prices/screenshot")
+    async def app_screenshot(shop: str = Form(""), image: UploadFile = File(...), t: str | None = Query(None)):
+        check(t)
+        import asyncio
+
+        from .adapters.appshop import read_screenshot
+
+        plat = core.settings.platforms.get(shop)
+        if not plat or plat.status != "app":
+            raise HTTPException(status_code=400, detail="Choose Breadfast or Rabbit.")
+        data = await image.read()
+        if not data or len(data) > 10_000_000 or not (image.content_type or "").startswith("image/"):
+            raise HTTPException(status_code=400, detail="Upload a screenshot (an image under 10 MB).")
+        try:
+            entries = await asyncio.to_thread(read_screenshot, data, image.content_type, plat.label,
+                                              core.settings.anthropic_key)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Could not read the screenshot: {e}") from e
+        if not entries:
+            raise HTTPException(status_code=400, detail="No products with prices on that screenshot. "
+                                "Upload the search results screen.")
+        core.prices.add(shop, entries)
+        return RedirectResponse(f"/{q(t)}#prices", status_code=303)
 
     @api.post("/prices/{action}")
     async def app_prices(action: str, shop: str = Form(""), lines: str = Form(""), entry: int = Form(-1),

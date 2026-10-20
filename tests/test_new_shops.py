@@ -230,3 +230,79 @@ async def test_amazon_now_reads_its_search_tiles():
 def parse_price(t):
     from shopper.adapters.amazon_eg import parse_price as p
     return p(t)
+
+
+def _fake_claude(monkeypatch, products, stop="end_turn"):
+    import anthropic
+    from types import SimpleNamespace
+    from shopper.adapters import appshop
+    seen = {}
+    out = appshop._Screen(products=[appshop._Seen(name=n, price=p) for n, p in products])
+
+    class Fake:
+        def __init__(self, **kw):
+            parse = lambda **kw: seen.update(kw) or SimpleNamespace(stop_reason=stop, parsed_output=out)  # noqa: E731
+            self.beta = SimpleNamespace(messages=SimpleNamespace(parse=parse))
+
+    monkeypatch.setattr(anthropic, "Anthropic", Fake)
+    return seen
+
+
+def test_screenshot_prices_are_read_by_claude(monkeypatch):
+    import pytest
+    from shopper.adapters.appshop import read_screenshot
+    seen = _fake_claude(monkeypatch, [("Juhayna  Skimmed Milk 1L", 54.95), ("", 3), ("Banner", 0)])
+    assert read_screenshot(b"\x89PNG", "image/png", "Breadfast", "key") == [("Juhayna Skimmed Milk 1L", 54.95)]
+    image, text = seen["messages"][0]["content"]
+    assert image["source"]["media_type"] == "image/png" and "Breadfast" in text["text"] and seen["fallbacks"] == "default"
+    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+        read_screenshot(b"x", "image/png", "Breadfast", "")
+    _fake_claude(monkeypatch, [], stop="refusal")
+    with pytest.raises(RuntimeError, match="could not read"):
+        read_screenshot(b"x", "image/png", "Breadfast", "key")
+
+
+def test_screenshot_upload_on_the_home_page(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from shopper.app import App
+    from shopper.config import PlatformConfig, PlatformFees, Settings
+    from shopper.web import create_app
+    _fake_claude(monkeypatch, [("Rabbit Rice 1kg", 41.5)])
+    s = Settings(home=tmp_path, platforms={"rabbit": PlatformConfig("rabbit", "Rabbit", "app", True, PlatformFees())})
+    s.web_token, s.anthropic_key = "k", "key"
+    app = App(s)
+    client = TestClient(create_app(app))
+    assert "Read the screenshot" in client.get("/?t=k").text
+    r = client.post("/prices/screenshot?t=k", data={"shop": "rabbit"}, files={"image": ("s.png", b"\x89PNG", "image/png")})
+    assert r.status_code == 200 and "Rabbit Rice 1kg" in r.text
+    bad = client.post("/prices/screenshot?t=k", data={"shop": "rabbit"}, files={"image": ("s.txt", b"hi", "text/plain")})
+    assert bad.status_code == 400
+
+
+async def test_screenshot_in_telegram(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from telegram.ext import CallbackQueryHandler, MessageHandler
+    from shopper.app import App
+    from shopper.bot import build_bot
+    from shopper.config import PlatformConfig, PlatformFees, Settings
+    _fake_claude(monkeypatch, [("Breadfast Eggs 30 pcs", 165.0)])
+    s = Settings(home=tmp_path, platforms={n: PlatformConfig(n, n.title(), "app", True, PlatformFees()) for n in ("breadfast", "rabbit")})
+    s.telegram_token, s.allowed_chat_ids, s.anthropic_key = "123456:TEST", {42}, "key"
+    app = App(s)
+    hs = build_bot(app).handlers[0]
+    photo = next(h for h in hs if isinstance(h, MessageHandler) and "on_photo" in h.callback.__name__)
+    button = next(h for h in hs if isinstance(h, CallbackQueryHandler))
+    f = SimpleNamespace(download_as_bytearray=AsyncMock(return_value=bytearray(b"\xff\xd8")))
+    sent = AsyncMock()
+    msg = SimpleNamespace(photo=[SimpleNamespace(get_file=AsyncMock(return_value=f))], document=None, caption=None, reply_text=sent)
+    update = SimpleNamespace(effective_message=msg, effective_chat=SimpleNamespace(id=42, send_action=AsyncMock()), callback_query=None)
+    await photo.callback(update, None)  # no caption: which app?
+    assert "Which app" in sent.call_args.args[0]
+    query = SimpleNamespace(data="ss:breadfast", answer=AsyncMock(), edit_message_text=AsyncMock())
+    await button.callback(SimpleNamespace(callback_query=query, effective_message=msg, effective_chat=update.effective_chat), None)
+    assert "Read 1 Breadfast price" in sent.call_args.args[0]
+    assert [(p, n, price) for _, p, n, price, _ in app.prices.latest()] == [("breadfast", "Breadfast Eggs 30 pcs", 165.0)]
+    msg.caption = "Rabbit"
+    await photo.callback(update, None)
+    assert app.prices.latest("rabbit")

@@ -17,7 +17,7 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
 | Instashop shops (Mahmoud ElFar by default) | **search live on the home PC**, tested 2026-10-19 | reads the shop page in Shopping Chrome. shopper types the query, presses Enter and reads the results popup (verified from your dump). The popup has no product links, so offers link to the shop page. The product tiles are verified from your capture. Instashop encrypts its API and requires reCAPTCHA, and shopper does not bypass either |
 | **noon Minutes**, **Amazon Now** | built 2026-10-20, **not verified live** | Shopping Chrome, from the links you gave; a failed search saves the page to `~/.shopper/captures/<shop>/failed-search-*` |
 | Carrefour direct site | not needed | Carrefour comes through talabat |
-| Breadfast, Rabbit | **app shops**, from 2026-10-20 | their websites have no catalogue, so you type the app's price (`/price` in Telegram, or **Prices from the apps** on the home page). Comparisons use each price for 30 days and say how old it is |
+| Breadfast, Rabbit | **app shops**, from 2026-10-20 | their websites have no catalogue (checked again 2026-10-20). Send a screenshot of the app's search results to the bot (caption `breadfast` or `rabbit`) or upload it on the home page; Claude reads each product and price. Typing `item = price` lines still works. Comparisons use each price for 30 days and say how old it is |
 
 Every other shop that was checked, Amazon Now and noon Minutes included, is in [docs/retailers.md](docs/retailers.md), with the next step for each.
 
@@ -57,13 +57,30 @@ Every other shop that was checked, Amazon Now and noon Minutes included, is in [
    - **Tailscale** (needed only for the "Full table" link). Install it on the PC and on the phone, signed in with the same account. On the PC, run `tailscale serve --bg 8765`, then set `WEB_BASE_URL` to the `https://<pc>.<tailnet>.ts.net` address it prints. Keep `WEB_HOST=127.0.0.1`: Tailscale forwards to it, so nothing is exposed to the internet.
    - Start `shopper serve` again. Keep the PC awake while you shop.
 
+## How to write an item
+
+An item has six fields. Only the item is required. Every field you fill must match; every field you leave empty is open.
+
+| Field | Means | Examples |
+|---|---|---|
+| Item | what it is | milk, rice, instant coffee |
+| Brand | only this brand counts as exact; empty = any brand | Juhayna, Al Doha |
+| Type | variant, flavour or grade | skimmed, full cream, basmati |
+| Size of one | one piece | 1L, 200ml, 5kg |
+| Pieces in pack | pieces in one pack | 6 (a 6-pack), 30 (eggs) |
+| How many | packs to buy; empty = 1 | 2 |
+
+Typed and pasted lines use the same order: how many, brand, type, item, pieces x size. `2 Juhayna skimmed milk 6x1L` is two six-packs of 1 L Juhayna skimmed milk. The home page has one row of fields per item with a live "Searches for" line; Telegram's **Add an item** asks the fields one by one, with buttons for brands, types and sizes seen in shops before. Result pages, the list and the bot show how each line was read.
+
 ## The home page
 
 Open `WEB_BASE_URL/?t=<WEB_TOKEN>`. It shows:
-- A box to type or paste a list, with **Compare prices** and **Add to the list**. Options (exact matches only, most orders) fold away.
+- Item rows (see above), a box to paste a list, **Compare prices** and **Add to the list**. Options (exact matches only, most orders) fold away.
 - **Products you chose before** as chips: tap one to put that line in the box.
 - **The household list**, with Remove, **Compare the list** and **Clear the list**.
 - **Recent comparisons**, each with its item count and best total. A page from before the last restart opens as history, without buttons.
+- **Your delivery area**: Seoudi's own list of districts in New Cairo, each with the branch that serves it. Choose yours once; Seoudi prices and stock then come from that branch. A district Seoudi lists without a branch (for example South El-Lotus, 2026-10-20) uses its default store, and the result page says so.
+- **Prices from the apps**: typed lines or a screenshot upload for Breadfast and Rabbit.
 - **Shops**, grouped by how shopper reaches them.
 
 If `WEB_TOKEN` is empty, `shopper serve` creates an access key, saves it in `~/.shopper/web_token`, and prints it, so the page is never open to anyone on your network.
@@ -86,7 +103,7 @@ The page reads like a shop shelf. Each item shows one shelf label per shop, chea
 
 Telegram:
 - Send one line to compare that item now: `2 Juhayna full cream milk 1L`. Send several lines to compare a basket.
-- The keyboard under the text box has **Compare my list**, **My list**, **My watches** and **How to use**. The "/" button lists every command.
+- The keyboard under the text box has **Compare my list**, **My list**, **Add an item**, **My watches** and **How to use**. The "/" button lists every command.
 - Under each result: **Add the plan to my carts** (shown once the plan is final; it works once per result), **Save as my list**, and **Open the full table** (when `WEB_BASE_URL` is your https Tailscale address).
 - **The household list** is shared by everyone in `TELEGRAM_ALLOWED_CHAT_IDS` and by the web page. `/add <lines>` adds; under `/list`, **Remove**, **Compare the list** and **Clear the list** are buttons.
 - `/watch Nescafe classic 200g @ 250` watches an item. The bot re-prices it every `WATCH_INTERVAL_HOURS` (default 6). With a target, it alerts you when the cheapest exact match reaches it; without one, when the price drops by more than 1%. Alerts carry **Open the product** and **Stop watching** buttons; `/watches` lists them with **Stop** buttons.
@@ -164,7 +181,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · pwa.py (phone app) · cli.py · store.py (SQLite price history)
-tests/             141 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             153 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

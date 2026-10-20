@@ -11,6 +11,7 @@ Send a message:
   /watches           -> your watches, with buttons to stop them
   /push              -> add the last best plan to your carts (noon, Amazon)
   /price             -> type prices from an app-only shop (Breadfast, Rabbit)
+  a screenshot       -> of Breadfast or Rabbit search results: the bot reads the prices
 
 Each item has six fields, in this order: how many, brand, type, item, pieces x size.
 "2 Juhayna skimmed milk 6x1L" is 2 six-packs of 1 L Juhayna skimmed milk. Fields you give must
@@ -67,7 +68,8 @@ WIZARD_MINUTES = 15  # an unfinished step-by-step add expires; plain text then c
 # When /add or /watch come without text, the bot asks with these, and reads your reply.
 ADD_PROMPT = "Send the lines to add, one item per line."
 WATCH_PROMPT = "Send the item to watch, with a target price if you want one: Nescafe classic 200g @ 250"
-PRICE_PROMPT = "Send {label} prices from the app, one per line, like: Juhayna skimmed milk 1L = 54.95"
+PRICE_PROMPT = ("Send {label} prices from the app, one per line, like: Juhayna skimmed milk 1L = 54.95\n"
+                "Or send a screenshot of the app's search results with the caption {name}.")
 COMMANDS = [
     BotCommand("list", "Show the household list"),
     BotCommand("compare", "Compare the household list"),
@@ -335,7 +337,7 @@ def build_bot(core: App) -> Application:
             wizards.pop(chat, None)  # a menu button ends an unfinished step-by-step add
         elif not asked and wizard(chat) and await wizard_text(update, wizard(chat), text):
             return
-        shop = next((n for n, lbl in app_shops().items() if asked == PRICE_PROMPT.format(label=lbl)), None)
+        shop = next((n for n, lbl in app_shops().items() if asked == PRICE_PROMPT.format(label=lbl, name=n)), None)
         if shop:
             await save_prices(update, shop, text)
         elif asked == ADD_PROMPT:
@@ -397,6 +399,14 @@ def build_bot(core: App) -> Application:
             await show_list(update, edit=True)
         elif kind in ("cf", "dn"):
             await on_check(update, query, kind, rest)
+        elif kind == "ss" and rest in app_shops():
+            shot = screens.pop(update.effective_chat.id, None)
+            if shot is None:
+                await query.answer("Send the screenshot again.", show_alert=True)
+            else:
+                await query.answer("Reading the screenshot")
+                await safe_edit(query, f"Reading the {app_shops()[rest]} screenshot.")
+                await read_screen(update, rest, *shot)
         elif kind == "ap" and rest in app_shops():
             await query.answer()
             await ask_prices(update, rest)
@@ -638,7 +648,7 @@ def build_bot(core: App) -> Application:
         return {n: p.label for n, p in core.settings.platforms.items() if p.status == "app" and p.enabled}
 
     async def ask_prices(update: Update, shop: str) -> None:
-        await update.effective_message.reply_text(PRICE_PROMPT.format(label=app_shops()[shop]),
+        await update.effective_message.reply_text(PRICE_PROMPT.format(label=app_shops()[shop], name=shop),
                                                   reply_markup=ForceReply(input_field_placeholder="item = price"))
 
     async def save_prices(update: Update, shop: str, text: str) -> None:
@@ -669,6 +679,48 @@ def build_bot(core: App) -> Application:
             await update.effective_message.reply_text("Which app?", reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton(lbl, callback_data=f"ap:{n}") for n, lbl in shops.items()]]))
 
+    screens: dict[int, tuple[bytes, str]] = {}  # chat -> screenshot waiting for its shop
+
+    async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """A screenshot of Breadfast or Rabbit: read its prices. The caption names the shop, or buttons ask."""
+        if not ok(update):
+            return
+        msg, shops = update.effective_message, app_shops()
+        if not shops:
+            await reply(update, "No app-only shops are enabled, so there is nothing to read screenshots for.")
+            return
+        if msg.photo:
+            f, kind = await msg.photo[-1].get_file(), "image/jpeg"
+        else:
+            f, kind = await msg.document.get_file(), msg.document.mime_type or "image/jpeg"
+        image = bytes(await f.download_as_bytearray())
+        caption = (msg.caption or "").strip().lower()
+        shop = next((n for n, lbl in shops.items() if caption and (caption.startswith(n) or caption.startswith(lbl.lower()))), None)
+        if shop is None and len(shops) > 1:
+            screens[update.effective_chat.id] = (image, kind)
+            await msg.reply_text("Which app is this screenshot from?", reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(lbl, callback_data=f"ss:{n}") for n, lbl in shops.items()]]))
+            return
+        await read_screen(update, shop or next(iter(shops)), image, kind)
+
+    async def read_screen(update: Update, shop: str, image: bytes, kind: str) -> None:
+        from .adapters.appshop import read_screenshot
+
+        await update.effective_chat.send_action(ChatAction.TYPING)
+        try:
+            entries = await asyncio.to_thread(read_screenshot, image, kind, app_shops()[shop], core.settings.anthropic_key)
+        except Exception as e:
+            log.warning("screenshot: %s", e)
+            await reply(update, f"Could not read the screenshot: {e}")
+            return
+        if not entries:
+            await reply(update, "No products with prices on that screenshot. Send the search results screen.")
+            return
+        core.prices.add(shop, entries)
+        lines = "\n".join(f"• {n}: {p:,.2f}" for n, p in entries)
+        await reply(update, f"Read {len(entries)} {app_shops()[shop]} price(s) from the screenshot. They count in "
+                            f"comparisons for 30 days. Check them; delete a wrong one on the home page.\n{lines}")
+
     async def push(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if ok(update):
             await push_rid(update, core.last_rid.get(update.effective_chat.id))
@@ -686,6 +738,7 @@ def build_bot(core: App) -> Application:
     bot.add_handler(CommandHandler("compare", compare_saved))
     bot.add_handler(CallbackQueryHandler(on_button))
     bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    bot.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, on_photo))
     bot.add_error_handler(on_error)
     return bot
 

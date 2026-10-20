@@ -72,9 +72,11 @@ def parse_with_claude(text: str, api_key: str) -> list[ItemRequest]:
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
-    resp = client.messages.parse(
+    resp = client.beta.messages.parse(
         model=MODEL,
         max_tokens=4000,
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",  # a declined request is retried on a fallback model in the same call
         output_config={"effort": "low"},
         system=_SYSTEM,
         messages=[{"role": "user", "content": text}],

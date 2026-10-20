@@ -46,9 +46,10 @@ def test_claude_fields_become_phrases(monkeypatch):
 
     class Fake:
         def __init__(self, **kw):
-            self.messages = SimpleNamespace(parse=lambda **kw: seen.update(kw) or SimpleNamespace(stop_reason="end_turn", parsed_output=out))
+            parse = lambda **kw: seen.update(kw) or SimpleNamespace(stop_reason="end_turn", parsed_output=out)  # noqa: E731
+            self.beta = SimpleNamespace(messages=SimpleNamespace(parse=parse))
 
     monkeypatch.setattr(anthropic, "Anthropic", Fake)
     items = parsing.parse_with_claude("2 علبة لبن جهينة خالي الدسم ٦×١ لتر، بيض ٣٠", "key")
     assert [(i.qty, i.query) for i in items] == [(2, "Juhayna skimmed milk 6x1L"), (1, "eggs 30 pcs")]
-    assert seen["output_format"] is parsing._List and "never invent" in seen["system"]
+    assert seen["output_format"] is parsing._List and "never invent" in seen["system"] and seen["fallbacks"] == "default"

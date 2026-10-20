@@ -259,7 +259,7 @@ border-radius:10px;border:1px solid var(--line);background:var(--card);color:var
 .fields span{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:2px 10px}
 .fields i{font-style:normal;color:var(--muted);margin-right:4px}.fields .open{opacity:.6}
 .guide{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:8px 0;font-size:14px}.guide b{white-space:nowrap}
-select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+select{font:inherit;max-width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 input[type=number]{font:inherit;width:4em;padding:4px 6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 code{font-size:.9em;background:var(--leaf);padding:1px 5px;border-radius:4px}
 .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}button.quiet{background:var(--leaf);color:var(--ink)}

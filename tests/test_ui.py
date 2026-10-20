@@ -269,7 +269,7 @@ def test_home_item_rows_compare(tmp_path):
     app = core(tmp_path)
     client = TestClient(create_app(app))
     home = client.get("/?t=k").text
-    assert home.count("class=itemrow") == 3 and "Or paste a list" in home and "Add another item" in home
+    assert home.count("class=itemrow") == 2 and "Or paste a list" in home and "Add another item" in home
     assert "How shopper reads an item" in home and "<datalist id=brands>" in home and "Size of one" in home
     page = client.post("/compare?t=k", data={"item": ["coffee", "milk", ""], "brand": ["Nescafe", "Juhayna", ""],
                                               "kind": ["classic", "skimmed", ""], "amount": ["200", "1", ""],
