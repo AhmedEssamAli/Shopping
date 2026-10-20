@@ -246,9 +246,19 @@ padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:var(--card
 .actionbar a.go{background:var(--basil);color:var(--basil-ink)}}
 .notes{margin-top:28px;font-size:13px}.notes p{margin:4px 0}.warn{color:var(--tomato)}
 textarea{width:100%;min-height:180px;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
-.itemrow{display:grid;grid-template-columns:2fr 1.2fr 1fr .8fr .8fr;gap:8px;margin-bottom:8px}
-.itemrow input,input[type=text]{font:inherit;min-width:0;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
-@media (max-width:620px){.itemrow{grid-template-columns:1fr 1fr 1fr}.itemrow input:first-child{grid-column:1/-1}}
+.itemrow{display:grid;grid-template-columns:2fr 1.3fr 1.2fr 1.5fr .8fr .8fr;gap:8px;margin-bottom:10px;padding:10px;
+border:1px solid var(--line);border-radius:12px;background:var(--page)}
+.itemrow label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:600;color:var(--muted);min-width:0}
+.itemrow label b{color:var(--tomato)}
+.itemrow input,.itemrow select,input[type=text]{font:inherit;font-size:15px;font-weight:400;min-width:0;width:100%;padding:9px;
+border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.sizebox{display:grid;grid-template-columns:1fr 70px;gap:4px}
+.itemrow .preview{grid-column:1/-1;margin:0;font-size:13px;color:var(--muted)}.itemrow .preview b{color:var(--ink)}
+@media (max-width:620px){.itemrow{grid-template-columns:1fr 1fr}.itemrow label:first-child{grid-column:1/-1}}
+.fields{display:flex;flex-wrap:wrap;gap:6px;margin:-2px 0 10px;font-size:13px}
+.fields span{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:2px 10px}
+.fields i{font-style:normal;color:var(--muted);margin-right:4px}.fields .open{opacity:.6}
+.guide{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:8px 0;font-size:14px}.guide b{white-space:nowrap}
 select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 input[type=number]{font:inherit;width:4em;padding:4px 6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 code{font-size:.9em;background:var(--leaf);padding:1px 5px;border-radius:4px}
@@ -353,6 +363,17 @@ def _cards_html(result: CompareResult, settings: Settings, i: int, base: str | N
     return f"<div class=choices>{''.join(cards)}</div>"
 
 
+def fields_html(query: str) -> str:
+    """What shopper understood from the line, field by field; an open field reads "any"."""
+    from .entry import read_entry
+    e = read_entry(query)
+    parts = [("Item", e.item), ("Brand", e.brand or "any"), ("Type", e.type or "any"), ("Size", e.size or "any")]
+    if e.pieces > 1:
+        parts.append(("Pack", f"{e.pieces} pieces"))
+    return "<p class=fields>" + "".join(
+        f"<span class='{'open' if v == 'any' else ''}'><i>{k}</i> {escape(v)}</span>" for k, v in parts) + "</p>"
+
+
 def _line_html(result: CompareResult, settings: Settings, i: int, base: str | None, q: str) -> str:
     r = result.items[i]
     found = [(p, m) for p, m in r.matches.items() if m]
@@ -392,7 +413,7 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
         choose = (f"<div id=pick-{i}><h3 class=small style='margin:16px 0 8px'>Which one do you mean?</h3>{cards}</div>"
                   if r.needs_pick else f"<details class=choose id=pick-{i}><summary>Wrong product? Choose</summary>{cards}</details>")
     return (f"<section class=line><header><span class=qty>{r.request.qty}×</span><h3>{escape(r.request.query)}</h3>{state}</header>"
-            f"{body}{miss}{choose}</section>")
+            f"{fields_html(r.request.query)}{body}{miss}{choose}</section>")
 
 
 def branch_note(a) -> str:

@@ -154,22 +154,69 @@ def test_household_list_merge_keeps_order(tmp_path):
     assert [i.query for i in st.get_list(0)][1:] in (["milk", "rice"], ["rice", "eggs"])
 
 
-async def test_add_without_text_asks_then_reads_the_reply(tmp_path):
+async def test_add_without_text_goes_step_by_step(tmp_path):
     from telegram.ext import CommandHandler
 
-    from shopper.bot import ADD_PROMPT
+    from shopper.bot import ASK, MY_LIST
+    from shopper.models import Offer
     app = core(tmp_path)
+    app.store.record_offers([Offer("a", "Juhayna Skimmed Milk 1L", 56, "u1"), Offer("a", "Almarai Full Cream Milk 1L", 55, "u2")])
     app.settings.telegram_token, app.settings.allowed_chat_ids = "123456:TEST", {42}
     hs = build_bot(app).handlers[0]
     add = next(h for h in hs if isinstance(h, CommandHandler) and "add" in h.commands)
+    button = next(h for h in hs if isinstance(h, CallbackQueryHandler))
     on_text = next(h for h in hs if isinstance(h, MessageHandler))
     update, sent = fake_update(text="/add")
     await add.callback(update, None)
-    assert sent.call_args.args[0] == ADD_PROMPT
-    update, sent = fake_update(text="2 rice 5kg\nmilk 1L")
-    update.effective_message.reply_to_message = SimpleNamespace(text=ADD_PROMPT)
+    assert sent.call_args.args[0] == ASK["item"]
+
+    update, sent = fake_update(text="milk")
     await on_text.callback(update, None)
-    assert [(i.qty, i.query) for i in app.list_items()] == [(2, "rice 5kg"), (1, "milk 1L")]
+    assert ASK["brand"] in sent.call_args.args[0]
+    brands = [b.text for row in sent.call_args.kwargs["reply_markup"].inline_keyboard for b in row]
+    assert set(brands[:2]) == {"Juhayna", "Almarai"} and "Any brand" in brands  # seen in shops before
+
+    async def tap(data):
+        update, _ = fake_update(data=data)
+        await button.callback(update, None)
+        return update.callback_query.edit_message_text.call_args
+
+    assert ASK["type"] in (await tap(f"wz:brand:{brands.index('Juhayna')}")).args[0]
+    update, sent = fake_update(text="skimmed")
+    await on_text.callback(update, None)
+    assert ASK["size"] in sent.call_args.args[0]
+    update, sent = fake_update(text="1 litre")
+    await on_text.callback(update, None)
+    assert ASK["pieces"] in sent.call_args.args[0]
+    assert ASK["qty"] in (await tap("wz:pieces:2")).args[0]  # 6
+    done = await tap("wz:qty:1")  # 2
+    assert "2 × Juhayna skimmed milk 6x1L" in done.args[0] and "brand Juhayna · type skimmed · size 1L · pack of 6" in done.args[0]
+    assert "Added: 2 × Juhayna skimmed milk 6x1L" in (await tap("wz:add")).args[0]
+    assert [(i.qty, i.query) for i in app.list_items()] == [(2, "Juhayna skimmed milk 6x1L")]
+
+    # Typed in full at step 1, the filled steps are skipped; a pasted list is added as it is.
+    update, _ = fake_update(text="/add")
+    await add.callback(update, None)
+    update, sent = fake_update(text="Al Doha basmati rice 5kg")
+    await on_text.callback(update, None)
+    assert ASK["pieces"] in sent.call_args.args[0]
+    update, sent = fake_update(text=MY_LIST)  # a menu button ends the add
+    await on_text.callback(update, None)
+    assert "1. 2 × Juhayna skimmed milk 6x1L\n    brand Juhayna · type skimmed · size 1L · pack of 6" in sent.call_args.args[0]
+    update, _ = fake_update(text="/add")
+    await add.callback(update, None)
+    update, _ = fake_update(text="2 rice 5kg\nmilk 1L")
+    await on_text.callback(update, None)
+    assert [(i.qty, i.query) for i in app.list_items()][-2:] == [(2, "rice 5kg"), (1, "milk 1L")]
+
+
+def test_set_field_rejects_what_does_not_fit():
+    from shopper.bot import set_field
+    from shopper.entry import Entry
+    e = Entry("milk")
+    assert not set_field(e, "size", "big") and not set_field(e, "qty", "two") and not set_field(e, "item", " ")
+    assert set_field(e, "size", "6 x 1L") and (e.size, e.pieces) == ("1L", 6)
+    assert set_field(e, "size", "30 pcs") and e.pieces == 30
 
 
 async def test_chat_text_links_names_and_escapes(tmp_path):
@@ -223,10 +270,16 @@ def test_home_item_rows_compare(tmp_path):
     client = TestClient(create_app(app))
     home = client.get("/?t=k").text
     assert home.count("class=itemrow") == 3 and "Or paste a list" in home and "Add another item" in home
-    page = client.post("/compare?t=k", data={"item": ["Nescafe classic", ""], "brand": ["", ""], "size": ["200g", ""],
-                                              "pieces": ["", ""], "qty": ["2", ""], "items": ""}, follow_redirects=True)
+    assert "How shopper reads an item" in home and "<datalist id=brands>" in home and "Size of one" in home
+    page = client.post("/compare?t=k", data={"item": ["coffee", "milk", ""], "brand": ["Nescafe", "Juhayna", ""],
+                                              "kind": ["classic", "skimmed", ""], "amount": ["200", "1", ""],
+                                              "unit": ["g", "L", ""], "pieces": ["", "6", ""], "qty": ["2", "", ""],
+                                              "items": ""}, follow_redirects=True)
     rid = page.url.path.split("/")[-1]
     r = app.results[rid].items
-    assert [(x.request.query, x.request.qty) for x in r] == [("Nescafe classic 200g", 2)]
+    assert [(x.request.query, x.request.qty) for x in r] == [("Nescafe classic coffee 200g", 2), ("Juhayna skimmed milk 6x1L", 1)]
+    assert "<i>Brand</i> Nescafe" in page.text and "<i>Pack</i> 6 pieces" in page.text
+    short = client.post("/compare?t=k", data={"item": ["rice"], "items": ""}, follow_redirects=True)  # other fields absent
+    assert "<i>Brand</i> any" in short.text
     empty = client.post("/compare?t=k", data={"item": [""], "items": ""})
     assert empty.status_code == 400 and "Fill in at least one item" in empty.text

@@ -4,12 +4,17 @@ Send a message:
   one line           -> compare that item now
   several lines      -> compare that basket now
   /add <lines>       -> add to the household list
+  /add (no text)     -> add one item step by step: item, brand, type, size, pieces, how many
   /list              -> the list, with buttons to remove lines, compare or clear
   /compare [exact]   -> compare the list
   /watch <item> [@ price]  -> alert me when it drops (or reaches the price)
   /watches           -> your watches, with buttons to stop them
   /push              -> add the last best plan to your carts (noon, Amazon)
   /price             -> type prices from an app-only shop (Breadfast, Rabbit)
+
+Each item has six fields, in this order: how many, brand, type, item, pieces x size.
+"2 Juhayna skimmed milk 6x1L" is 2 six-packs of 1 L Juhayna skimmed milk. Fields you give must
+match; fields you leave out are open (no brand = any brand). The bot shows how it read each line.
 
 The buttons under the keyboard do the common things. Under each result you get buttons
 to add the plan to your carts, save it as the list, or open the full table. When several
@@ -19,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import zlib
 
 from telegram import (BotCommand, ForceReply, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update)
@@ -26,6 +32,8 @@ from telegram.constants import ChatAction
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from .app import App
+from .entry import Entry, entry_of, read_entry, size_text, suggest
+from .units import parse_size
 from .report import label
 from .service import CompareResult
 from .watcher import best_exact, check_watches, parse_watch
@@ -38,8 +46,24 @@ LIST_BUTTONS = 20  # remove buttons shown under /list
 
 # The keyboard that stays under the text box. Its buttons arrive as plain text.
 COMPARE_LIST, MY_LIST, WATCHES, HOW = "Compare my list", "My list", "My watches", "How to use"
-MENU = ReplyKeyboardMarkup([[COMPARE_LIST, MY_LIST], [WATCHES, HOW]], resize_keyboard=True, is_persistent=True,
+ADD_ITEM = "Add an item"
+MENU = ReplyKeyboardMarkup([[COMPARE_LIST, MY_LIST], [ADD_ITEM, WATCHES], [HOW]], resize_keyboard=True, is_persistent=True,
                            input_field_placeholder="Type an item or paste a list")
+MENU_BUTTONS = {COMPARE_LIST, MY_LIST, WATCHES, HOW, ADD_ITEM}
+
+# Step-by-step add: one question per field of the entry (see entry.py).
+STEPS = ("item", "brand", "type", "size", "pieces", "qty")
+ASK = {
+    "item": "Step 1 of 6. What is the item? Like milk, rice, instant coffee.\nTo add several, paste them one per line.",
+    "brand": "Step 2 of 6. Which brand? Tap one, type another, or tap Any brand.",
+    "type": "Step 3 of 6. Which type, flavour or grade? Like skimmed, full cream, basmati.",
+    "size": "Step 4 of 6. Size of one piece? Like 1L, 200ml, 500g, 5kg.",
+    "pieces": "Step 5 of 6. Pieces in one pack? 6 for a 6-pack, 30 for a tray of eggs.",
+    "qty": "Step 6 of 6. How many packs?",
+}
+OPEN = {"brand": "Any brand", "type": "Any type", "size": "Any size", "pieces": "Single piece"}
+FIXED = {"pieces": ["2", "4", "6", "12", "24", "30"], "qty": ["1", "2", "3", "4", "5", "6"]}
+WIZARD_MINUTES = 15  # an unfinished step-by-step add expires; plain text then compares again
 # When /add or /watch come without text, the bot asks with these, and reads your reply.
 ADD_PROMPT = "Send the lines to add, one item per line."
 WATCH_PROMPT = "Send the item to watch, with a target price if you want one: Nescafe classic 200g @ 250"
@@ -114,6 +138,48 @@ def list_keyboard(items) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton("Compare the list", callback_data="cmp"),
                      InlineKeyboardButton("Clear the list", callback_data="clr")])
     return InlineKeyboardMarkup(rows)
+
+
+def wizard_keyboard(step: str, options: list[str]) -> InlineKeyboardMarkup:
+    """Choices for one step ("wz:<step>:<index>"), the open choice ("wz:<step>:-") and Cancel."""
+    opts = (FIXED.get(step) or options)[:9]
+    rows = [[InlineKeyboardButton(o[:BUTTON_TEXT], callback_data=f"wz:{step}:{k + i}") for i, o in enumerate(opts[k:k + 3])]
+            for k in range(0, len(opts), 3)]
+    last = [InlineKeyboardButton(OPEN[step], callback_data=f"wz:{step}:-")] if step in OPEN else []
+    rows.append(last + [InlineKeyboardButton("Cancel", callback_data="wz:x")])
+    return InlineKeyboardMarkup(rows)
+
+
+DONE_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("Add to the list", callback_data="wz:add"), InlineKeyboardButton("Compare now", callback_data="wz:cmp")],
+    [InlineKeyboardButton("Start over", callback_data="wz:new"), InlineKeyboardButton("Cancel", callback_data="wz:x")]])
+
+
+def set_field(e: Entry, step: str, value: str) -> bool:
+    """Put a typed or tapped value into the entry. False when it does not fit the step."""
+    value = " ".join(value.split())
+    if step == "item":
+        if not value:
+            return False
+        typed = read_entry(value)  # "Juhayna skimmed milk 1L" typed at step 1 fills those fields too
+        e.item, e.brand, e.type = typed.item, typed.brand or e.brand, typed.type or e.type
+        e.size, e.pieces = typed.size or e.size, typed.pieces if typed.pieces > 1 else e.pieces
+    elif step == "size":
+        found = parse_size(value)
+        if not found:
+            return False
+        if found.unit == "pcs":
+            e.pieces = int(found.amount)
+        else:
+            e.size = size_text(found)
+            e.pieces = found.pack if found.pack > 1 else e.pieces
+    elif step in ("pieces", "qty"):
+        if not value.isdigit() or not 0 < int(value) < 1000:
+            return False
+        setattr(e, step, int(value))
+    else:
+        setattr(e, step, value.lower() if step == "type" else value)
+    return True
 
 
 def parse_callback(data: str) -> tuple[str, str, int, str | None] | None:
@@ -233,7 +299,7 @@ def build_bot(core: App) -> Application:
 
     async def show_list(update: Update, edit: bool = False) -> None:
         items = core.list_items()
-        text = ("\n".join(f"{i + 1}. {it.qty} × {it.query}" for i, it in enumerate(items))
+        text = ("\n".join(f"{i + 1}. {it.qty} × {it.query}\n    {entry_of(it).summary()}" for i, it in enumerate(items))
                 or "The list is empty. Add lines with /add, or press Save as my list under a result.")
         if edit and update.callback_query:
             await safe_edit(update.callback_query, text[:TG_LIMIT], list_keyboard(items))
@@ -264,6 +330,11 @@ def build_bot(core: App) -> Application:
             return
         text = update.effective_message.text.strip()
         asked = getattr(getattr(update.effective_message, "reply_to_message", None), "text", "") or ""
+        chat = update.effective_chat.id
+        if text in MENU_BUTTONS:
+            wizards.pop(chat, None)  # a menu button ends an unfinished step-by-step add
+        elif not asked and wizard(chat) and await wizard_text(update, wizard(chat), text):
+            return
         shop = next((n for n, lbl in app_shops().items() if asked == PRICE_PROMPT.format(label=lbl)), None)
         if shop:
             await save_prices(update, shop, text)
@@ -271,6 +342,8 @@ def build_bot(core: App) -> Application:
             await add_lines(update, text)
         elif asked == WATCH_PROMPT:
             await add_watch(update, text)
+        elif text == ADD_ITEM:
+            await start_wizard(update)
         elif text == COMPARE_LIST:
             await run_compare(update, core.list_items())
         elif text == MY_LIST:
@@ -291,6 +364,8 @@ def build_bot(core: App) -> Application:
         kind, _, rest = data.partition(":")
         if kind in ("pk", "fg"):
             await on_pick(update, query)
+        elif kind == "wz":
+            await on_wizard_button(update, query, rest)
         elif kind in ("push", "save"):
             result = core.results.get(rest)
             if result is None:
@@ -379,12 +454,110 @@ def build_bot(core: App) -> Application:
         if not any(x.needs_pick for x in result.items):
             await reply(update, "<b>Updated plan</b>\n" + core.chat_text(rid), result_keyboard(core, result, rid), html=True)
 
+    wizards: dict[int, dict] = {}  # chat -> step-by-step add in progress
+
+    def wizard(chat: int) -> dict | None:
+        w = wizards.get(chat)
+        if w and time.monotonic() - w["at"] > WIZARD_MINUTES * 60:
+            wizards.pop(chat, None)
+            return None
+        return w
+
+    def advance(w: dict) -> None:
+        """Next step, skipping fields already given (typed "Juhayna skimmed milk 1L" at step 1)."""
+        e, w["at"] = w["entry"], time.monotonic()
+        w["step"] += 1
+        while w["step"] < len(STEPS) and ((STEPS[w["step"]] in ("brand", "type", "size") and getattr(e, STEPS[w["step"]]))
+                                           or (STEPS[w["step"]] == "pieces" and e.pieces > 1)):
+            w["step"] += 1
+
+    async def ask_step(update: Update, w: dict, query=None) -> None:
+        e = w["entry"]
+        if w["step"] >= len(STEPS):
+            text, markup = f"Check this item:\n{e.qty} × {e.phrase()}\n    {e.summary()}", DONE_KEYBOARD
+        else:
+            step = STEPS[w["step"]]
+            text, markup = ASK[step], wizard_keyboard(step, w["options"].get(step, []))
+            if w["step"] > 0:
+                text = f"{e.phrase()}\n\n{text}"
+        if query:
+            await safe_edit(query, text, markup)
+        else:
+            await reply(update, text, markup)
+
+    async def start_wizard(update: Update, query=None) -> None:
+        wizards[update.effective_chat.id] = {"entry": Entry(""), "step": 0, "options": {}, "at": time.monotonic()}
+        await ask_step(update, wizards[update.effective_chat.id], query)
+
+    async def wizard_text(update: Update, w: dict, text: str) -> bool:
+        """Typed answer to the current step. False when there is no open step (the text is a new search)."""
+        if w["step"] >= len(STEPS):
+            wizards.pop(update.effective_chat.id, None)
+            return False
+        step = STEPS[w["step"]]
+        if step == "item" and "\n" in text:  # a pasted list
+            wizards.pop(update.effective_chat.id, None)
+            await add_lines(update, text)
+            return True
+        if not set_field(w["entry"], step, text):
+            await reply(update, "That does not fit this step.\n" + ASK[step], wizard_keyboard(step, w["options"].get(step, [])))
+            return True
+        if step == "item":
+            first = (w["entry"].item.split() or [""])[0]
+            w["options"] = suggest(core.store.recent_names(first), w["entry"].item) if len(first) > 2 else {}
+        advance(w)
+        await ask_step(update, w)
+        return True
+
+    async def on_wizard_button(update: Update, query, rest: str) -> None:
+        chat = update.effective_chat.id
+        if rest == "x":
+            wizards.pop(chat, None)
+            await query.answer("Cancelled")
+            await safe_edit(query, "Cancelled. Tap Add an item to start again.")
+            return
+        if rest == "new":
+            await query.answer()
+            await start_wizard(update, query)
+            return
+        w = wizard(chat)
+        if w is None:
+            await query.answer("This add expired. Tap Add an item to start again.", show_alert=True)
+            return
+        e = w["entry"]
+        if rest in ("add", "cmp") and w["step"] >= len(STEPS):
+            wizards.pop(chat, None)
+            await query.answer()
+            if rest == "add":
+                core.add_to_list([e.request()])
+                await safe_edit(query, f"Added: {e.qty} × {e.phrase()}\n    {e.summary()}\nThe list has "
+                                       f"{len(core.list_items())} line(s).", list_keyboard(core.list_items()))
+            else:
+                await safe_edit(query, f"Comparing {e.qty} × {e.phrase()}")
+                await run_compare(update, [e.request()])
+            return
+        step, _, choice = rest.partition(":")
+        if w["step"] >= len(STEPS) or STEPS[w["step"]] != step:
+            await query.answer("That step is done already.")
+            return
+        options = FIXED.get(step) or w["options"].get(step, [])
+        if choice == "-":
+            setattr(e, step, 1 if step == "pieces" else "")
+        elif choice.isdigit() and int(choice) < len(options):
+            set_field(e, step, options[int(choice)])
+        else:
+            await query.answer("That choice is gone. Type it instead.")
+            return
+        await query.answer()
+        advance(w)
+        await ask_step(update, w, query)
+
     async def add(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not ok(update):
             return
         text = update.effective_message.text.partition(" ")[2].strip()
         if not text:
-            await update.effective_message.reply_text(ADD_PROMPT, reply_markup=ForceReply(input_field_placeholder="2 milk 1L"))
+            await start_wizard(update)
             return
         await add_lines(update, text)
 
@@ -394,7 +567,9 @@ def build_bot(core: App) -> Application:
             await reply(update, "Nothing to add. Send one item per line, like 2 Juhayna full cream milk 1L.")
             return
         core.add_to_list(items)
-        await reply(update, f"Added {len(items)}. The list has {len(core.list_items())} line(s).", list_keyboard(core.list_items()))
+        read = "\n".join(f"{it.qty} × {it.query}\n    {entry_of(it).summary()}" for it in items)
+        await reply(update, f"Added {len(items)}:\n{read}\nThe list has {len(core.list_items())} line(s).",
+                    list_keyboard(core.list_items()))
 
     async def show(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if ok(update):

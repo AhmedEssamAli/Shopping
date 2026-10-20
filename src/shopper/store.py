@@ -54,6 +54,12 @@ class Store:
         self.db.execute("INSERT OR REPLACE INTO prefs VALUES (?,?)", (key, value))
         self.db.commit()
 
+    def recent_names(self, word: str, limit: int = 400) -> list[str]:
+        """Listing names seen before that contain ``word``, newest first (for suggestions)."""
+        rows = self.db.execute("SELECT name FROM offers WHERE name LIKE ? GROUP BY name ORDER BY MAX(fetched_at) DESC LIMIT ?",
+                               (f"%{word}%", limit))
+        return [r[0] for r in rows]
+
     def record_offers(self, offers: list[Offer]) -> None:
         self.db.executemany(
             "INSERT INTO offers VALUES (?,?,?,?,?,?,?)",

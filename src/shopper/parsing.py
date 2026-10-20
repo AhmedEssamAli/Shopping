@@ -11,6 +11,7 @@ import re
 
 from pydantic import BaseModel, Field
 
+from .entry import compose
 from .models import ItemRequest
 from .units import _SINGLE
 
@@ -44,8 +45,12 @@ def parse_local(text: str) -> list[ItemRequest]:
 
 
 class _Item(BaseModel):
-    query: str = Field(description="English search phrase: brand, product, variant, size. e.g. 'Juhayna full cream milk 1L'")
-    qty: int = Field(ge=1, description="How many units to buy")
+    item: str = Field(description="What the product is, in English, without brand, type or size: 'milk', 'rice', 'instant coffee'")
+    brand: str = Field("", description="Brand if the user gave one, usual English spelling: 'Juhayna'. Empty if none")
+    type: str = Field("", description="Variant, flavour or grade if given: 'skimmed', 'full cream', 'basmati'. Empty if none")
+    size: str = Field("", description="Size of ONE piece if given, like '1L', '200ml', '500g', '5kg'. Empty if none")
+    pieces: int = Field(1, ge=1, description="Pieces in one pack: 6 for a 6-pack, 30 for a tray of 30 eggs, else 1")
+    qty: int = Field(1, ge=1, description="How many packs to buy")
 
 
 class _List(BaseModel):
@@ -55,11 +60,11 @@ class _List(BaseModel):
 _SYSTEM = (
     "You convert a household shopping list for Cairo, Egypt into search phrases for Egyptian online stores "
     "(Amazon.eg, noon, talabat, Gourmet, Seoudi, Spinneys). The list may be English, Arabic or Franco-Arabic. "
-    "For each item return one concise English phrase with brand (if given), product, variant and size, and the "
-    "quantity to buy. Keep the user's brand and size; do not invent a brand or size they did not give. "
-    "Transliterate Egyptian brand names to their usual English spelling (جهينة -> Juhayna, المراعي -> Almarai). "
-    "A size such as 5kg or 1 litre is part of the phrase, not the quantity. Pieces in one pack are part of the "
-    "phrase too: a 6-pack of 1 L milk is '6x1L', a tray of 30 eggs is '30 pcs'; the quantity is how many packs."
+    "Split each item into fields: item (what it is), brand, type (variant, flavour or grade), size of one piece, "
+    "pieces in one pack, and how many packs to buy. Leave a field empty when the user did not give it; never "
+    "invent a brand, type or size. Transliterate Egyptian brand names to their usual English spelling "
+    "(جهينة -> Juhayna, المراعي -> Almarai). A size such as 5kg or 1 litre is the size, not the quantity. "
+    "A 6-pack of 1 L milk is size '1L', pieces 6; a tray of 30 eggs is pieces 30 with no size."
 )
 
 
@@ -77,7 +82,8 @@ def parse_with_claude(text: str, api_key: str) -> list[ItemRequest]:
     )
     if resp.stop_reason == "refusal" or resp.parsed_output is None:
         raise RuntimeError(f"Claude did not return a list (stop_reason={resp.stop_reason})")
-    return [ItemRequest(i.query.strip(), i.qty) for i in resp.parsed_output.items if i.query.strip()]
+    return [e.request() for e in (compose(i.item, i.brand, i.type, i.size, i.pieces, i.qty)
+                                   for i in resp.parsed_output.items) if e]
 
 
 def parse_list(text: str, api_key: str = "") -> list[ItemRequest]:
@@ -87,25 +93,3 @@ def parse_list(text: str, api_key: str = "") -> list[ItemRequest]:
         except Exception as e:  # network, auth, refusal: the local parser still works
             log.warning("Claude parsing failed, using local parser: %s", e)
     return parse_local(text)
-
-
-def compose_item(item: str, brand: str = "", size: str = "", pieces: str = "", qty: str | int = "") -> ItemRequest | None:
-    """One row of the item form -> an ItemRequest.
-
-    "skimmed milk" + "Juhayna" + "1L" + pieces "6" + qty 2 -> 2 × "Juhayna skimmed milk 6x1L".
-    Pieces alone mean a count in the pack ("eggs", pieces 30 -> "eggs 30 pcs").
-    """
-    item, brand, size, pieces = (" ".join(str(x or "").split()) for x in (item, brand, size, pieces))
-    if not item:
-        return None
-    words = [brand] if brand and brand.lower() not in item.lower() else []
-    words.append(item)
-    if pieces.isdigit() and int(pieces) > 1:
-        words.append(f"{pieces}x{size}" if size else f"{pieces} pcs")
-    elif size:
-        words.append(size)
-    try:
-        n = max(int(str(qty).strip() or 1), 1)
-    except ValueError:
-        n = 1
-    return ItemRequest(" ".join(words), n)
