@@ -194,9 +194,9 @@ async def safe_evaluate(page: Page, js: str, default):
 
 
 def dump_page(settings: Settings, platform: str, query: str, html: str, info: dict,
-              extra: dict[str, str] | None = None) -> Path:
+              extra: dict[str, str] | None = None, kind: str = "failed-search") -> Path:
     """Save a page that gave no results, for diagnosis. ``extra`` adds more files by name."""
-    out = settings.captures_dir / platform / f"failed-search-{datetime.now():%Y%m%d-%H%M%S}"
+    out = settings.captures_dir / platform / f"{kind}-{datetime.now():%Y%m%d-%H%M%S}"
     out.mkdir(parents=True, exist_ok=True)
     (out / "page.html").write_text(html, encoding="utf-8")
     for fname, text in (extra or {}).items():

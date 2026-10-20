@@ -18,6 +18,7 @@ https://www.amazon.eg/-/en/tez/browse?qcbrand=sAuWWBROaG
 """
 from __future__ import annotations
 
+import logging
 import re
 from urllib.parse import quote_plus, urljoin
 
@@ -76,6 +77,8 @@ TILES_JS = r"""() => {
   });
 }"""
 
+log = logging.getLogger(__name__)
+
 SEARCH_BOXES = ["#twotabsearchtextbox", "input[type=search]", "input[name=q]", "input[name=k]",
                 "input[placeholder*='earch' i]", "input[placeholder*='looking for' i]", "input[placeholder*='بحث']"]
 LOST = "You've lost connection"  # Amazon Now's offline notice
@@ -92,6 +95,7 @@ class QuickShopAdapter(Adapter):
         self.session = session
         self.wait_s = wait_s
         self.reader = reader  # the shop's own product reader (JS), tried first
+        self.keep_page = False  # --debug: save the results page too, to tune the reader
 
     async def _rows(self, page) -> list[dict]:
         for js in filter(None, [self.reader, AMAZON_CARDS, GENERIC_JS, TILES_JS]):
@@ -159,6 +163,9 @@ class QuickShopAdapter(Adapter):
                 dump = dump_page(self.session.settings, self.name, query, await page.content(), {"url": page.url})
                 raise RuntimeError(f"{self.label}: no products found.{note} Saved the page to {dump} — send me that folder.")
             base = page.url
+            if self.keep_page:
+                saved = dump_page(self.session.settings, self.name, query, await page.content(), {"url": base}, kind="search")
+                log.warning("%s: saved the results page to %s", self.label, saved)
         finally:
             await page.close()
         return self.parse(rows, base)[:limit]

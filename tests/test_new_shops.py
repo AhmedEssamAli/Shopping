@@ -186,3 +186,24 @@ def test_quick_shop_search_urls_and_boxes():
     a = amazon_now(None)
     assert a.search_url == "https://www.amazon.eg/tez/browse/search?qcbrand=sAuWWBROaG&searchKeyword={q}"
     assert any("looking for" in s for s in SEARCH_BOXES)  # noon Minutes: "What are you looking for?"
+
+
+async def test_debug_keeps_the_results_page(tmp_path):
+    import os
+    import types
+    import pytest
+    chromium = os.environ.get("BROWSER_EXECUTABLE", "/opt/pw-browsers/chromium")
+    if not Path(chromium).exists():
+        pytest.skip("needs Chromium")
+    from playwright.async_api import async_playwright
+    from shopper.adapters.quick import noon_minutes
+    html = (FIX / "noon_minutes_boxes.html").read_text(encoding="utf-8")
+    async with async_playwright() as p:
+        b = await p.chromium.launch(executable_path=chromium)
+        ctx = await b.new_context()
+        await ctx.route("**/*", lambda r: r.fulfill(body=html, content_type="text/html; charset=utf-8"))
+        a = noon_minutes(types.SimpleNamespace(new_page=ctx.new_page, settings=types.SimpleNamespace(captures_dir=tmp_path)))
+        a.wait_s, a.keep_page = 1, True
+        offers = await a.search("Bebeto sour worms")
+        await b.close()
+    assert offers and len(list((tmp_path / "noon_minutes").glob("search-*/page.html"))) == 1

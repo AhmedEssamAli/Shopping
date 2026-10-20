@@ -62,6 +62,10 @@ async def _compare(requests: list[ItemRequest], args) -> None:
         only = set(args.platforms.split(","))
         for p in app.settings.platforms.values():
             p.enabled = p.name in only
+    if args.debug:
+        for a in app.adapters.values():
+            if hasattr(a, "keep_page"):
+                a.keep_page = True
     try:
         result, text, rid = await app.run(requests, max_orders=args.max_orders, exact_only=args.exact)
         print(text)
