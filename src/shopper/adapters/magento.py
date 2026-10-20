@@ -8,6 +8,11 @@ branch that serves a location, and Seoudi's own site sends that branch's ``sourc
 ``sourcecode`` header on every catalogue call; with it, the assortment and stock change
 (Seoudi: "District 5" for the default New Cairo point). shopper does the same, using
 AREA_LAT / AREA_LON. That Spinneys honours the header is not verified.
+
+Seoudi maps areas, not points (verified 2026-10-20): each city lists its districts, and each
+district names the branch that serves it (``available_store``), or none. The default New Cairo
+point falls in "Investors Area 2" -> District 5. You choose your district on the home page;
+shopper then uses that district's branch, exactly as Seoudi's own area picker does.
 """
 from __future__ import annotations
 
@@ -45,6 +50,9 @@ class MagentoAdapter(Adapter):
         self.branch_at = branch_at  # (lat, lon) to look up the serving branch, for shops that have them
         self.branch: str | None = None  # the branch name, once found (shown on the page)
         self._source: str | None = None
+        self.area: str | None = None  # the district you chose (Seoudi), shown with the branch
+        self.area_cities: tuple[int, ...] = ()  # cities to offer in the area picker
+        self._areas: list[dict] | None = None
         self._client: httpx.AsyncClient | None = None
 
     def _http(self) -> httpx.AsyncClient:
@@ -69,6 +77,25 @@ class MagentoAdapter(Adapter):
             log.warning("%s: no branch found for %s,%s (%s); using the default store", self.label, lat, lon, e)
             self._source = ""
         return self._source
+
+    async def areas(self) -> list[dict]:
+        """Districts of ``area_cities`` with the branch that serves each, from the shop's own list."""
+        if self._areas is None:
+            out = []
+            for cid in self.area_cities:
+                q = '{city(id:"%s"){name available_districts{id name available_store{name storeSource{source_code}}}}}' % cid
+                r = await self._http().post(self.graphql_url, json={"query": q})
+                city = r.json()["data"]["city"]
+                for d in city["available_districts"] or []:
+                    store = d.get("available_store") or {}
+                    out.append({"id": str(d["id"]), "city": city["name"].strip(), "district": d["name"].strip(),
+                                "store": store.get("name"), "source": (store.get("storeSource") or {}).get("source_code") or ""})
+            self._areas = sorted(out, key=lambda a: (a["city"], a["district"].lower()))
+        return self._areas
+
+    def use_area(self, area: dict) -> None:
+        """Search as the branch of the district you chose. A district without a branch uses the default store."""
+        self.area, self.branch, self._source = area["district"], area.get("store"), area.get("source") or ""
 
     async def search(self, query: str, limit: int = 12) -> list[Offer]:
         source = await self._source_code()
@@ -117,9 +144,16 @@ def gourmet() -> MagentoAdapter:
                           login_url="https://gourmetegypt.com", size_field="product_weight")
 
 
+# Seoudi city ids in and around New Cairo (from its store list, 2026-10-20): First Settlement,
+# Fifth Settlement, District 5, Al Rehab, Madinty, El Shorouk, Sodic East.
+SEOUDI_CITIES = (25, 31, 125, 87, 121, 118, 135)
+
+
 def seoudi(at: tuple[float, float] | None = None) -> MagentoAdapter:
-    return MagentoAdapter("seoudi", "Seoudi Market", "https://mcprod.seoudisupermarket.com/graphql",
-                          "https://seoudisupermarket.com/en", login_url="https://seoudisupermarket.com/en", branch_at=at)
+    a = MagentoAdapter("seoudi", "Seoudi Market", "https://mcprod.seoudisupermarket.com/graphql",
+                       "https://seoudisupermarket.com/en", login_url="https://seoudisupermarket.com/en", branch_at=at)
+    a.area_cities = SEOUDI_CITIES
+    return a
 
 
 def hyperone() -> MagentoAdapter:

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS offers (
 CREATE INDEX IF NOT EXISTS offers_sku ON offers(platform, sku);
 CREATE TABLE IF NOT EXISTS results (id TEXT PRIMARY KEY, created_at TEXT, html TEXT);
 CREATE TABLE IF NOT EXISTS lists (chat_id INTEGER, pos INTEGER, query TEXT, qty INTEGER);
+CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS watches (
   id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, query TEXT, target REAL,
   last_price REAL, last_platform TEXT, last_url TEXT, checked_at TEXT
@@ -44,6 +45,14 @@ class Store:
             self.db.execute("ALTER TABLE results ADD COLUMN summary TEXT")
         except sqlite3.OperationalError:
             pass
+
+    def pref(self, key: str) -> str | None:
+        row = self.db.execute("SELECT value FROM prefs WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_pref(self, key: str, value: str) -> None:
+        self.db.execute("INSERT OR REPLACE INTO prefs VALUES (?,?)", (key, value))
+        self.db.commit()
 
     def record_offers(self, offers: list[Offer]) -> None:
         self.db.executemany(

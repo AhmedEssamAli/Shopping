@@ -395,6 +395,20 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
             f"{body}{miss}{choose}</section>")
 
 
+def branch_note(a) -> str:
+    """Which branch's prices a shop with branches gave, and why."""
+    area, branch = getattr(a, "area", None), getattr(a, "branch", None)
+    if area and branch:
+        return f"{a.label} prices are for its {branch} branch, which serves {area} (your area, set on the home page)."
+    if area:
+        return (f"{a.label} lists {area} without a branch, so it may not deliver there. "
+                f"Prices are from its default store. Choose a nearby area on the home page to compare a branch.")
+    if branch:
+        return (f"{a.label} prices are for its {branch} branch, found from AREA_LAT/AREA_LON. "
+                f"If that is not yours, choose your area on the home page.")
+    return ""
+
+
 def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapter],
             base: str | None = None, token: str | None = None, learned: dict[str, int] | None = None) -> str:
     """``base`` (like "/r/<id>") turns on the pick / not this / change buttons."""
@@ -418,8 +432,7 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
         notes.append("Fees not verified, counted as 0: " + ", ".join(label(settings, p) for p in result.unverified_fees))
     notes += [f"{label(settings, p)}: {e}" for p, e in result.errors.items()]
     notes += age_notes(result, settings)
-    notes += [f"{a.label} prices are for its {a.branch} branch, the one that serves your location (AREA_LAT, AREA_LON)."
-              for p, a in adapters.items() if p in result.platforms and getattr(a, "branch", None)]
+    notes += [branch_note(a) for p, a in adapters.items() if p in result.platforms and branch_note(a)]
     if learned:
         notes.append(f"Learned so far: {learned.get('answers', 0)} answer{'s' if learned.get('answers', 0) != 1 else ''}, "
                      f"{learned['lines']} chosen product{'s' if learned['lines'] != 1 else ''}, "

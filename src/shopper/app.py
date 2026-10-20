@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from urllib.parse import quote
 
 from .adapters import build_adapters
@@ -34,6 +35,21 @@ class App:
         self.last_rid: dict[int, str] = {}  # per Telegram chat, for /push
         self.results: dict[str, CompareResult] = {}
         self.push_log: dict[str, list[str]] = {}  # result id -> what its cart push reported, from bot or web
+        for name, a in self.adapters.items():  # the delivery area you chose on the home page
+            saved = self.store.pref(f"area:{name}")
+            if saved and hasattr(a, "use_area"):
+                a.use_area(json.loads(saved))
+
+    async def set_area(self, shop: str, district_id: str) -> dict | None:
+        """Choose the shop's delivery district (Seoudi). Returns the area, or None if unknown."""
+        a = self.adapters.get(shop)
+        if not a or not hasattr(a, "areas"):
+            return None
+        area = next((x for x in await a.areas() if x["id"] == district_id), None)
+        if area:
+            a.use_area(area)
+            self.store.set_pref(f"area:{shop}", json.dumps(area))
+        return area
 
     def result_url(self, rid: str) -> str:
         token = f"?t={quote(self.settings.web_token)}" if self.settings.web_token else ""

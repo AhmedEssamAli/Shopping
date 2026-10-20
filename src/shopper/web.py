@@ -86,6 +86,34 @@ def create_app(core: App) -> FastAPI:
                 f"<div class=actions><button>Save prices</button></div>"
                 + (f"<ul class=list style='margin-top:14px'>{rows}</ul>" if rows else "") + "</form>")
 
+    async def areas_html(t: str | None) -> str:
+        """Choose the district for shops that price by branch (Seoudi), from the shop's own area list."""
+        parts = []
+        for name, a in core.adapters.items():
+            if not hasattr(a, "areas") or not getattr(a, "area_cities", ()):
+                continue
+            try:
+                areas = await a.areas()
+            except Exception as e:  # noqa: BLE001 - the page still works without the picker
+                log.warning("%s areas: %s", a.label, e)
+                continue
+            groups: dict[str, list[str]] = {}
+            for x in areas:
+                where = f" — {x['store']} branch" if x["store"] else " — no branch"
+                sel = " selected" if a.area == x["district"] else ""
+                groups.setdefault(x["city"], []).append(
+                    f"<option value='{escape(x['id'])}'{sel}>{escape(x['district'] + where)}</option>")
+            opts = "".join(f"<optgroup label='{escape(c)}'>{''.join(v)}</optgroup>" for c, v in groups.items())
+            now = (f"Now: <b>{escape(a.area)}</b>, {escape(a.branch + ' branch') if a.branch else 'no branch (default store)'}."
+                   if a.area else f"Now: found from your map point{', ' + escape(a.branch) + ' branch' if a.branch else ''}. "
+                   f"Choose your area to be sure.")
+            parts.append(f"<form method=post action='/area/{escape(name)}{q(t)}' class=panel>"
+                         f"<p class=small style='margin:0 0 8px'><b>{escape(a.label)}</b> prices and stock depend on the branch "
+                         f"that serves your area. {now}</p><p><select name=district aria-label='{escape(a.label)} area' required>"
+                         f"<option value=''>Choose your area</option>{opts}</select></p>"
+                         f"<div class=actions><button>Use this area</button></div></form>")
+        return ("<h2 id=area>Your delivery area</h2>" + "".join(parts)) if parts else ""
+
     def shops_html() -> str:
         groups: dict[str, list[str]] = {}
         for p in core.settings.platforms.values():
@@ -147,7 +175,7 @@ def create_app(core: App) -> FastAPI:
                   "document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{"
                   "const t=document.getElementById('items');t.value=(t.value.trim()?t.value.trim()+'\\n':'')+b.dataset.line;"
                   "t.focus();b.disabled=true}))</script>")
-        return pwa.add_head(page("Compare a basket", form + saved + past + app_prices_html(t) + shops_html() + script, header), t)
+        return pwa.add_head(page("Compare a basket", form + saved + past + app_prices_html(t) + await areas_html(t) + shops_html() + script, header), t)
 
     @api.post("/prices/{action}")
     async def app_prices(action: str, shop: str = Form(""), lines: str = Form(""), entry: int = Form(-1),
@@ -162,6 +190,13 @@ def create_app(core: App) -> FastAPI:
         else:
             raise HTTPException(status_code=404)
         return RedirectResponse(f"/{q(t)}#prices", status_code=303)
+
+    @api.post("/area/{shop}")
+    async def area(shop: str, district: str = Form(""), t: str | None = Query(None)):
+        check(t)
+        if not await core.set_area(shop, district):
+            raise HTTPException(status_code=400, detail="Choose an area from the list.")
+        return RedirectResponse(f"/{q(t)}#area", status_code=303)
 
     async def requests_from(items: str, rows: list[list[str]]) -> list:
         """Rows of the item form first, then any pasted lines."""
