@@ -152,3 +152,21 @@ def test_household_list_merge_keeps_order(tmp_path):
     st.merge_lists_into(0)
     assert [i.query for i in st.get_list(0)] == ["eggs", "milk", "rice"] or [i.query for i in st.get_list(0)] == ["milk", "rice", "eggs"]
     assert [i.query for i in st.get_list(0)][1:] in (["milk", "rice"], ["rice", "eggs"])
+
+
+async def test_add_without_text_asks_then_reads_the_reply(tmp_path):
+    from telegram.ext import CommandHandler
+
+    from shopper.bot import ADD_PROMPT
+    app = core(tmp_path)
+    app.settings.telegram_token, app.settings.allowed_chat_ids = "123456:TEST", {42}
+    hs = build_bot(app).handlers[0]
+    add = next(h for h in hs if isinstance(h, CommandHandler) and "add" in h.commands)
+    on_text = next(h for h in hs if isinstance(h, MessageHandler))
+    update, sent = fake_update(text="/add")
+    await add.callback(update, None)
+    assert sent.call_args.args[0] == ADD_PROMPT
+    update, sent = fake_update(text="2 rice 5kg\nmilk 1L")
+    update.effective_message.reply_to_message = SimpleNamespace(text=ADD_PROMPT)
+    await on_text.callback(update, None)
+    assert [(i.qty, i.query) for i in app.list_items()] == [(2, "rice 5kg"), (1, "milk 1L")]

@@ -20,7 +20,7 @@ import asyncio
 import logging
 import zlib
 
-from telegram import (BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update)
+from telegram import (BotCommand, ForceReply, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update)
 from telegram.constants import ChatAction
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -39,6 +39,9 @@ LIST_BUTTONS = 20  # remove buttons shown under /list
 COMPARE_LIST, MY_LIST, WATCHES, HOW = "Compare my list", "My list", "My watches", "How to use"
 MENU = ReplyKeyboardMarkup([[COMPARE_LIST, MY_LIST], [WATCHES, HOW]], resize_keyboard=True, is_persistent=True,
                            input_field_placeholder="Type an item or paste a list")
+# When /add or /watch come without text, the bot asks with these, and reads your reply.
+ADD_PROMPT = "Send the lines to add, one item per line."
+WATCH_PROMPT = "Send the item to watch, with a target price if you want one: Nescafe classic 200g @ 250"
 COMMANDS = [
     BotCommand("list", "Show the household list"),
     BotCommand("compare", "Compare the household list"),
@@ -216,7 +219,12 @@ def build_bot(core: App) -> Application:
         if not ok(update):
             return
         text = update.effective_message.text.strip()
-        if text == COMPARE_LIST:
+        asked = getattr(getattr(update.effective_message, "reply_to_message", None), "text", "") or ""
+        if asked == ADD_PROMPT:
+            await add_lines(update, text)
+        elif asked == WATCH_PROMPT:
+            await add_watch(update, text)
+        elif text == COMPARE_LIST:
             await run_compare(update, core.list_items())
         elif text == MY_LIST:
             await show_list(update)
@@ -298,9 +306,16 @@ def build_bot(core: App) -> Application:
     async def add(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not ok(update):
             return
-        items = await core.parse_async(update.effective_message.text.partition(" ")[2] or "")
+        text = update.effective_message.text.partition(" ")[2].strip()
+        if not text:
+            await update.effective_message.reply_text(ADD_PROMPT, reply_markup=ForceReply(input_field_placeholder="2 milk 1L"))
+            return
+        await add_lines(update, text)
+
+    async def add_lines(update: Update, text: str) -> None:
+        items = await core.parse_async(text)
         if not items:
-            await reply(update, "Usage: /add 2 Juhayna full cream milk 1L (one item per line)")
+            await reply(update, "Nothing to add. Send one item per line, like 2 Juhayna full cream milk 1L.")
             return
         core.add_to_list(items)
         await reply(update, f"Added {len(items)}. The list has {len(core.list_items())} line(s).", list_keyboard(core.list_items()))
@@ -333,9 +348,16 @@ def build_bot(core: App) -> Application:
     async def watch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not ok(update):
             return
-        query, target = parse_watch(update.effective_message.text.partition(" ")[2])
+        text = update.effective_message.text.partition(" ")[2].strip()
+        if not text:
+            await update.effective_message.reply_text(WATCH_PROMPT, reply_markup=ForceReply(input_field_placeholder="Nescafe classic 200g @ 250"))
+            return
+        await add_watch(update, text)
+
+    async def add_watch(update: Update, text: str) -> None:
+        query, target = parse_watch(text)
         if not query:
-            await reply(update, "Usage: /watch Nescafe classic 200g @ 250")
+            await reply(update, WATCH_PROMPT)
             return
         wid = core.store.add_watch(update.effective_chat.id, query, target)
         m = await best_exact(core, query)
