@@ -27,13 +27,17 @@ def create_app(core: App) -> FastAPI:
     @api.get("/", response_class=HTMLResponse)
     async def home(t: str | None = Query(None)):
         check(t)
-        body = (f"<h1>Compare a basket</h1><p class=muted>One item per line. Quantity first or last: "
-                f"<code>2 Juhayna full cream milk 1L</code>, <code>rice 5kg x1</code>. Delivery: {escape(core.settings.area_name)}.</p>"
-                f"<form method=post action='/compare{q(t)}'><textarea name=items required></textarea>"
-                f"<p><label><input type=checkbox name=exact value=1> exact matches only</label> · "
-                f"max orders <input name=max_orders type=number min=1 max=4 value={core.settings.max_orders} style='width:3em'></p>"
-                f"<button>Compare</button></form>")
-        return pwa.add_head(page("Compare a basket", body), t)
+        header = (f"<h1>What do you need?</h1><p>shopper checks every shop that delivers to "
+                  f"{escape(core.settings.area_name)} and finds the cheapest way to buy it.</p>")
+        body = (f"<form method=post action='/compare{q(t)}' class='panel plan'>"
+                f"<label for=items><h2 style='margin:0 0 6px'>Your list</h2></label>"
+                f"<p class='muted small' style='margin:0 0 10px'>One item per line, quantity first or last: "
+                f"<code>2 Juhayna full cream milk 1L</code> or <code>rice 5kg x1</code>.</p>"
+                f"<textarea id=items name=items required></textarea>"
+                f"<p class=small><label><input type=checkbox name=exact value=1> Exact matches only</label></p>"
+                f"<p class=small><label>Most orders to split into <input name=max_orders type=number min=1 max=4 "
+                f"value={core.settings.max_orders}></label></p><button>Compare prices</button></form>")
+        return pwa.add_head(page("Compare a basket", body, header), t)
 
     @api.post("/compare")
     async def run(items: str = Form(...), exact: str | None = Form(None), max_orders: int = Form(2), t: str | None = Query(None)):
@@ -54,9 +58,9 @@ def create_app(core: App) -> FastAPI:
         pushable = [core.adapters[p].label for p in (result.best.platforms if result and result.best else [])
                     if p in core.adapters and core.adapters[p].supports_cart_push]
         if pushable:
-            button = (f"<form method=post action='/r/{escape(rid)}/push{q(t)}' style='margin:16px 0'>"
+            button = (f"<form method=post action='/r/{escape(rid)}/push{q(t)}' style='margin:16px 0 0'>"
                       f"<button>Add the best plan to my carts ({escape(', '.join(pushable))})</button></form>")
-            html = html.replace("</main>", button + "</main>", 1)
+            html = html.replace("<!--cart-push-->", button, 1)
         return pwa.add_head(html, t)
 
     @api.post("/r/{rid}/push", response_class=HTMLResponse)
@@ -66,9 +70,9 @@ def create_app(core: App) -> FastAPI:
         if result is None:
             raise HTTPException(status_code=404, detail="Compare again; this result is no longer in memory")
         lines = await core.push_carts(result)
-        body = (f"<h1>Cart push</h1><ul>{''.join(f'<li>{escape(x)}</li>' for x in lines)}</ul>"
-                f"<p><a href='/r/{escape(rid)}{q(t)}'>Back to the comparison</a> · <a href='/{q(t)}'>New basket</a></p>")
-        return pwa.add_head(page("Cart push", body), t)
+        body = (f"<div class='panel plan'><ul>{''.join(f'<li>{escape(x)}</li>' for x in lines)}</ul>"
+                f"<p><a href='/r/{escape(rid)}{q(t)}'>Back to the comparison</a></p><p><a href='/{q(t)}'>Compare a new list</a></p></div>")
+        return pwa.add_head(page("Cart push", body, "<h1>Cart push</h1><p>What went into your carts.</p>"), t)
 
     @api.post("/r/{rid}/{action}")
     async def feedback(rid: str, action: str, item: int = Form(...), card: int | None = Form(None),

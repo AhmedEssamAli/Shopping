@@ -33,8 +33,8 @@ def offers():
 def test_pack_types_are_separate_products():
     cards = product_cards(COFFEE, offers())
     exact = {c.label for c in cards if c.exact}
-    assert exact == {"200g · sachet", "200g · pouch", "200g · jar"}
-    jar = next(c for c in cards if c.label == "200g · jar")
+    assert exact == {"200g, sachet", "200g, pouch", "200g, jar"}
+    jar = next(c for c in cards if c.label == "200g, jar")
     assert set(jar.per_platform()) == {"gourmet", "seoudi"}
 
 
@@ -48,7 +48,7 @@ async def test_pick_once_then_the_plan_uses_your_product(tmp_path):
     assert result.items[0].needs_pick and "Not final" in text
     assert result.best.assignments[0].offer.price == 261.99  # cheapest exact today: the pouch
 
-    jar = next(j for j, c in enumerate(result.items[0].cards) if c.label == "200g · jar")
+    jar = next(j for j, c in enumerate(result.items[0].cards) if c.label == "200g, jar")
     assert app.feedback(rid, "pick", 0, card=jar)
     m = result.best.assignments[0]
     assert m.offer.name.startswith("Nestlé") and m.pinned and not result.items[0].needs_pick
@@ -64,7 +64,7 @@ async def test_passed_over_pack_words_become_avoided(tmp_path):
     app = core(tmp_path)
     mem: Memory = app.memory
     result, _, rid = await app.run([COFFEE])
-    app.feedback(rid, "pick", 0, card=next(j for j, c in enumerate(result.items[0].cards) if c.label == "200g · jar"))
+    app.feedback(rid, "pick", 0, card=next(j for j, c in enumerate(result.items[0].cards) if c.label == "200g, jar"))
     assert "sachet" not in mem.avoid_words()  # once is not a habit
     tea = {"noon": [("Lipton Yellow Label Tea Sachet 100 bags", 120.0), ("Lipton Yellow Label Tea Box 100 bags", 130.0)]}
     app2 = core(tmp_path / "x", tea)
@@ -93,8 +93,44 @@ def test_web_buttons_pick_and_change(tmp_path):
     assert "Choose your products" in page.text and "This one" in page.text and "not this" in page.text
     rid = page.url.path.split("/")[-1]
     picked = client.post(f"/r/{rid}/pick?t=k", data={"item": 0, "card": 0}, follow_redirects=True)
-    assert "your product" in picked.text and "Learned so far: 1 chosen products" in picked.text
+    assert "your product" in picked.text and "Learned so far: 1 chosen product," in picked.text
     changed = client.post(f"/r/{rid}/forget?t=k", data={"item": 0}, follow_redirects=True)
     assert "Choose your products" in changed.text
     assert client.post(f"/r/{rid}/pick", data={"item": 0, "card": 0}).status_code == 404  # token required
     assert client.post(f"/r/{rid}/delete?t=k", data={"item": 0}).status_code == 404
+
+
+async def test_telegram_buttons_pick_and_choose_again(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from telegram.ext import CallbackQueryHandler
+
+    from shopper.bot import build_bot, parse_callback, pick_keyboard
+
+    app = core(tmp_path)
+    app.settings.telegram_token, app.settings.allowed_chat_ids = "123456:TEST", {42}
+    result, _, rid = await app.run([COFFEE])
+    kb = pick_keyboard(app, result, rid, 0)
+    labels = [row[0].text for row in kb.inline_keyboard]
+    assert labels[0].startswith("200g, pouch — 261.99 Amazon") and len(kb.inline_keyboard) == 3
+    jar = next(row[0] for row in kb.inline_keyboard if "jar" in row[0].text)
+    assert parse_callback(jar.callback_data)[:3] == ("pick", rid, 0) and parse_callback("pk:x:y:z") is None
+
+    handler = next(h for h in build_bot(app).handlers[0] if isinstance(h, CallbackQueryHandler))
+    sent = AsyncMock()
+    query = SimpleNamespace(data=jar.callback_data, answer=AsyncMock(), edit_message_text=AsyncMock())
+    update = SimpleNamespace(callback_query=query, effective_chat=SimpleNamespace(id=42),
+                             effective_message=SimpleNamespace(reply_text=sent))
+    await handler.callback(update, None)
+    assert "Chosen for Nescafe classic 200g: 200g, jar" in query.edit_message_text.call_args.args[0]
+    assert "Updated plan" in sent.call_args.args[0] and "300.00" in sent.call_args.args[0]
+    assert result.items[0].pinned
+
+    query.data = f"fg:{rid}:0"
+    await handler.callback(update, None)
+    assert not result.items[0].pinned and "Which one do you mean?" in query.edit_message_text.call_args.args[0]
+
+    query.data = "pk:gone:0:0"
+    await handler.callback(update, None)
+    assert "no longer open" in query.answer.call_args.args[0]

@@ -62,6 +62,10 @@ The web page installs as an app on your phone's home screen. It opens full scree
 
 In the app you paste a list, see the comparison, and press **Add the best plan to my carts** (noon and Amazon). The other platforms keep their product links.
 
+## The comparison page
+
+The page reads like a shop shelf. Each item shows one shelf label per shop, cheapest first; the cheapest exact match sits on the yellow label. Close matches have a dashed label. The best plan is at the top, with one block per order and the total on a yellow tag. **If you buy everything in one shop** shows what the whole basket costs at each shop on its own; shops that miss items get a striped bar. It follows your phone's dark mode.
+
 ## Use
 
 Telegram:
@@ -108,7 +112,8 @@ A short line like "Nescafe classic 200g" fits several products: a jar, a pouch a
 2. **This one.** Press it on the card you mean. The plan is recomputed at once, from the prices already fetched, with no new search. Next time you send the same line, in any spelling ("NESCAFÉ Classic 200 gm" counts as the same), that product wins on the platforms where you chose it. Other platforms are searched and matched with your choice added ("... 200g jar"), so a pouch no longer counts as your jar.
 3. **not this.** Press it under any price in the table. That listing never comes back for that line.
 4. **change.** Press it next to "your product" to choose again.
-5. **Words you avoid.** When you pass over a pack or variant word twice and never choose it (for example "sachet"), it stops counting as an exact match on every line that does not ask for it. Choosing it once undoes this.
+5. **In Telegram.** When several products fit a line, the bot sends "Which one do you mean?" with one button per product (size, pack type, lowest price, shops). Tap one; the bot confirms, offers **Choose again**, and sends the updated plan once every line is chosen.
+6. **Words you avoid.** When you pass over a pack or variant word twice and never choose it (for example "sachet"), it stops counting as an exact match on every line that does not ask for it. Choosing it once undoes this.
 
 Why memory and not a trained model: big retailers learn ranking from millions of clicks. One household makes a few dozen choices a month, which is too few to train on. Each choice is a direct answer, so storing it is exact from the first pick. shopper still uses each retailer's own search to find the listings.
 
@@ -137,7 +142,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · pwa.py (phone app) · cli.py · store.py (SQLite price history)
-tests/             96 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             97 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

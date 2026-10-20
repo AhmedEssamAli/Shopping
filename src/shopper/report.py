@@ -103,44 +103,77 @@ def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     return "\n".join(out)
 
 
+# Design: a shop's shelf edge. Prices sit on shelf labels, the cheapest exact one on the
+# yellow "best price" label that supermarkets use; everything else stays quiet basil and white.
+FONTS = ("<link rel=preconnect href='https://fonts.googleapis.com'><link rel=preconnect href='https://fonts.gstatic.com' crossorigin>"
+         "<link rel=stylesheet href='https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700"
+         "&family=Schibsted+Grotesk:wght@400;500;700;800&display=swap'>")
+
 CSS = """
-:root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#6b6a65;--line:#e4e2dc;--best:#e3f2e6;--best-fg:#14532d;--close:#8a5a00;--card:#fff}
-@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe6;--muted:#9c9a93;--line:#2e2d2a;--best:#163322;--best-fg:#bfe8cc;--close:#e0b45a;--card:#1d1d1a}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-main{max-width:1200px;margin:0 auto;padding:20px 16px}h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:24px 0 8px}
-.muted{color:var(--muted)}.wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
-table{border-collapse:collapse;width:100%;min-width:640px}th,td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
-th{font-weight:600;font-size:13px;color:var(--muted)}td.best{background:var(--best);color:var(--best-fg)}
-.price{font-weight:650;font-variant-numeric:tabular-nums}.name{font-size:13px}.close{color:var(--close);font-size:12px}
-a{color:inherit}.plan{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px}
-.plan b{font-variant-numeric:tabular-nums}ul{margin:6px 0 0;padding-left:18px}.warn{color:var(--close)}
-textarea{width:100%;min-height:160px;font:inherit;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
-button{font:inherit;padding:8px 16px;border-radius:8px;border:1px solid var(--line);background:var(--fg);color:var(--bg);cursor:pointer}
-form.inline{display:inline;margin:0}button.link{background:none;border:0;padding:2px 0;color:var(--muted);text-decoration:underline;font-size:12px}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin:8px 0 14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}.card ul{font-size:13px;margin-bottom:8px}
-h3{font-size:15px;margin:16px 0 4px}details{margin:8px 0}summary{cursor:pointer;color:var(--muted)}
+:root{--page:#f4f7f2;--card:#fff;--ink:#1a2b21;--muted:#5d6b62;--line:#dce5da;--basil:#1e5b3a;--basil-ink:#fff;
+--leaf:#e3efe1;--tag:#ffd43b;--tag-ink:#1a2b21;--tomato:#c8372d;--tomato-bg:#fdecea;--focus:#2f7fd8;
+--ui:'Schibsted Grotesk',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;--num:'Barlow Condensed','Arial Narrow',var(--ui)}
+@media (prefers-color-scheme:dark){:root{--page:#0f1913;--card:#16241c;--ink:#e6efe8;--muted:#9db0a3;--line:#253a2d;
+--basil:#2d7a50;--leaf:#1b2e22;--tomato:#ff8a7a;--tomato-bg:#3a1d1a}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--page);color:var(--ink);font:16px/1.5 var(--ui)}
+a{color:inherit;text-underline-offset:2px}:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.top{background:var(--basil);color:var(--basil-ink)}.top .in{max-width:1040px;margin:0 auto;padding:22px 16px 26px}
+.top h1{font-size:28px;line-height:1.15;font-weight:800;margin:0;letter-spacing:-.01em}
+.top p{margin:6px 0 0;opacity:.85;font-size:14px}.top a{color:inherit}
+main{max-width:1040px;margin:0 auto;padding:0 16px 48px}
+h2{font-size:20px;font-weight:800;margin:32px 0 10px;letter-spacing:-.01em}h3{font-size:17px;font-weight:700;margin:0}
+.muted{color:var(--muted)}.small{font-size:13px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}
+.plan{margin-top:-14px;box-shadow:0 6px 24px rgba(30,91,58,.12)}
+.plan .head{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px}.plan .head h2{margin:0;flex:1 1 auto}
+.tag{display:inline-flex;align-items:baseline;gap:4px;background:var(--tag);color:var(--tag-ink);font-family:var(--num);
+font-weight:700;border-radius:4px;padding:2px 10px;line-height:1.1;font-variant-numeric:tabular-nums}
+.tag small{font-size:.5em;font-weight:600}.tag.big{font-size:40px;padding:4px 14px}
+.bag{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}
+.bag .row{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+.bag ul{list-style:none;margin:8px 0 0;padding:0}.bag li{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:15px}
+.bag li span:last-child,.num{font-family:var(--num);font-size:18px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+.alt{margin-top:12px;font-size:14px}
+.notice{border-left:4px solid var(--tomato);background:var(--tomato-bg);border-radius:4px 12px 12px 4px;padding:12px 14px;margin:18px 0 0}
+.notice b{color:var(--tomato)}
+.shops{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+.shops li{display:grid;grid-template-columns:minmax(110px,1.2fr) 3fr auto;gap:12px;align-items:center;font-size:14px}
+.bar{height:10px;border-radius:5px;background:var(--leaf);overflow:hidden}.bar i{display:block;height:100%;background:var(--basil)}
+.shops .best .bar i{background:var(--tag)}.shops .partial .bar i{background:repeating-linear-gradient(135deg,var(--muted) 0 4px,transparent 4px 8px);opacity:.5}
+.line{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0}
+.line>header{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin-bottom:12px}
+.qty{font-family:var(--num);font-weight:700;font-size:20px;color:var(--basil)}
+.state{font-size:13px}.state.pick{color:var(--tomato);font-weight:700}
+.labels{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.label{border:1px solid var(--line);border-top:4px solid var(--basil);border-radius:4px;padding:8px 10px 10px;background:var(--card)}
+.label.best{background:var(--tag);border-color:var(--tag);color:var(--tag-ink)}.label.best .muted{color:#4d4a2a}
+.label.close{border-style:dashed;border-top-style:solid;border-top-color:var(--line)}
+.label .shop{font-size:12px;font-weight:700}.label .amount{font-family:var(--num);font-size:30px;font-weight:700;line-height:1.05}
+.label .product{display:block;font-size:13px;line-height:1.3;margin-top:4px}
+.flag{font-size:12px;margin-top:4px}.flag.close{color:var(--tomato)}
+.missing{font-size:13px;margin:10px 0 0}
+.choices{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:10px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x mandatory}
+.choice{scroll-snap-align:start;border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--card);display:flex;flex-direction:column;gap:6px}
+.choice ul{margin:0;padding-left:18px;font-size:13px}.choice .push{margin-top:auto}
+details.choose{margin:10px 0 0}details.choose summary{cursor:pointer;font-size:14px;color:var(--muted)}
+form.inline{display:inline;margin:0}
+button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;background:var(--basil);color:var(--basil-ink);cursor:pointer}
+button.link{background:none;color:inherit;padding:2px 0;font-weight:500;font-size:12px;text-decoration:underline;opacity:.75}
+.notes{margin-top:28px;font-size:13px}.notes p{margin:4px 0}.warn{color:var(--tomato)}
+textarea{width:100%;min-height:180px;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+input[type=number]{font:inherit;width:4em;padding:4px 6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+code{font-size:.9em;background:var(--leaf);padding:1px 5px;border-radius:4px}
+@media (max-width:520px){.top h1{font-size:24px}.tag.big{font-size:34px}.shops li{grid-template-columns:1fr auto}.shops .bar{grid-column:1/-1;order:3}}
+@media (prefers-reduced-motion:no-preference){.label.best{animation:pop .5s ease-out 1}@keyframes pop{from{transform:scale(.96)}to{transform:none}}}
 """
 
 
-def page(title: str, body: str) -> str:
+def page(title: str, body: str, header: str = "") -> str:
+    """``header``: inner HTML of the basil top band (title and summary)."""
+    top = f"<div class=top><div class=in>{header}</div></div>" if header else ""
     return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-            f"<title>{escape(title)}</title><style>{CSS}</style></head><body><main>{body}</main></body></html>")
-
-
-def _plan_html(result: CompareResult, prop: Proposal, settings: Settings, adapters: dict[str, Adapter], title: str) -> str:
-    rows = []
-    for platform in prop.platforms:
-        items = "".join(
-            f"<li>{m.request.qty} × <a href='{escape(m.offer.url)}' target='_blank' rel='noopener'>{escape(m.offer.name)}</a> "
-            f"@ {m.offer.price:,.2f}{'' if m.exact else ' <span class=close>close match</span>'}</li>"
-            for _, m in sorted(prop.assignments.items()) if m.offer.platform == platform
-        )
-        rows.append(f"<div><b>{escape(label(settings, platform))}</b> {_egp(prop.subtotals[platform])} + fees {_egp(prop.fees[platform])}<ul>{items}</ul></div>")
-    links = "".join(f"<div><a href='{escape(u)}' target='_blank' rel='noopener'>Open {escape(label(settings, p))} cart</a></div>"
-                    for p, u in cart_links(result, prop, adapters).items())
-    missing = ("<div class=warn>Not found: " + escape("; ".join(result.items[i].request.query for i in prop.missing)) + "</div>") if prop.missing else ""
-    return f"<div class=plan><div>{title}: <b>{_egp(prop.total)}</b></div>{''.join(rows)}{links}{missing}</div>"
+            f"<title>{escape(title)}</title>{FONTS}<style>{CSS}</style></head><body>{top}<main>{body}</main></body></html>")
 
 
 def _button(action: str | None, q: str, text: str, fields: dict, cls: str = "link") -> str:
@@ -154,91 +187,129 @@ def _unit(o) -> str:
     return f"{o.unit_price:,.1f}/{_per(o.size.unit)}" if o.unit_price else ""
 
 
+def _tag(amount: float, big: bool = False) -> str:
+    return f"<span class='tag{' big' if big else ''}'><small>EGP</small>{amount:,.2f}</span>"
+
+
+def _link(o, cls: str = "") -> str:
+    return f"<a class='{cls}' href='{escape(o.url)}' target='_blank' rel='noopener'>{escape(o.name)}</a>"
+
+
+def _plan_html(result: CompareResult, prop: Proposal, settings: Settings, adapters: dict[str, Adapter]) -> str:
+    shops = " and ".join(label(settings, p) for p in prop.platforms)
+    split = "one order" if len(prop.platforms) == 1 else f"{len(prop.platforms)} orders"
+    bags = []
+    for platform in prop.platforms:
+        items = "".join(
+            f"<li><span>{m.request.qty} × {_link(m.offer)}{'' if m.exact else ' <span class=warn>close match</span>'}</span>"
+            f"<span>{m.line_total:,.2f}</span></li>"
+            for _, m in sorted(prop.assignments.items()) if m.offer.platform == platform)
+        fee = prop.fees[platform]
+        bags.append(f"<div class=bag><div class=row><h3>{escape(label(settings, platform))}</h3>"
+                    f"<span class=num>{prop.subtotals[platform] + fee:,.2f}</span></div>"
+                    f"<div class='muted small'>items {prop.subtotals[platform]:,.2f}, fees {fee:,.2f}</div><ul>{items}</ul></div>")
+    links = "".join(f"<p class=small><a href='{escape(u)}' target='_blank' rel='noopener'>Open the {escape(label(settings, p))} cart</a></p>"
+                    for p, u in cart_links(result, prop, adapters).items())
+    missing = ("<p class='warn small'>Not found anywhere: " + escape("; ".join(result.items[i].request.query for i in prop.missing))
+               + "</p>") if prop.missing else ""
+    return (f"<div class=head><h2>Best plan</h2>{_tag(prop.total, big=True)}</div>"
+            f"<p class='muted small'>{escape(shops)}, {split}</p>{''.join(bags)}{links}{missing}<!--cart-push-->")
+
+
+def _one_shop_html(result: CompareResult, settings: Settings) -> str:
+    """What the whole basket costs at each shop on its own: the honest comparison."""
+    singles = sorted((p for p in result.proposals if len(p.platforms) == 1), key=lambda p: (len(p.missing), p.total))
+    if len(singles) < 2:
+        return ""
+    top = max(p.total for p in singles) or 1
+    n = len(result.items)
+    rows = []
+    for k, p in enumerate(singles):
+        have = n - len(p.missing)
+        note = "all items" if not p.missing else f"{have} of {n} items"
+        rows.append(f"<li class='{'best' if k == 0 else 'partial' if p.missing else ''}'><span><b>{escape(label(settings, p.platforms[0]))}</b>"
+                    f"<br><span class='muted small'>{note}</span></span><span class=bar><i style='width:{p.total / top * 100:.0f}%'></i></span>"
+                    f"<span class=num>{p.total:,.2f}</span></li>")
+    return f"<h2>If you buy everything in one shop</h2><div class=panel><ul class=shops>{''.join(rows)}</ul></div>"
+
+
 def _cards_html(result: CompareResult, settings: Settings, i: int, base: str | None, q: str) -> str:
     r = result.items[i]
     cards = []
     for j, c in enumerate(r.cards):
         best = c.cheapest()
-        listings = "".join(f"<li>{escape(label(settings, p))}: <a href='{escape(o.url)}' target='_blank' rel='noopener'>"
-                           f"{escape(o.name)}</a> · {o.price:,.2f}</li>" for p, o in c.per_platform().items())
-        tag = "" if c.exact else " <span class=close>other size or wording</span>"
-        cards.append(f"<div class=card><div><b>{escape(c.label)}</b>{tag}</div>"
-                     f"<div class=price>from {best.price:,.2f} <span class=muted>{_unit(best)}</span></div><ul>{listings}</ul>"
-                     f"{_button(base and base + '/pick', q, 'This one', {'item': i, 'card': j}, 'pick')}</div>")
-    return f"<div class=cards>{''.join(cards)}</div>"
+        listings = "".join(f"<li>{escape(label(settings, p))}: {_link(o)}, {o.price:,.2f}</li>" for p, o in c.per_platform().items())
+        tag = "" if c.exact else "<span class='warn small'>other size or wording</span>"
+        cards.append(f"<div class=choice><h3>{escape(c.label)}</h3>{tag}<div>{_tag(best.price)} <span class='muted small'>{_unit(best)}</span></div>"
+                     f"<ul>{listings}</ul><div class=push>{_button(base and base + '/pick', q, 'This one', {'item': i, 'card': j}, 'pick')}</div></div>")
+    return f"<div class=choices>{''.join(cards)}</div>"
+
+
+def _line_html(result: CompareResult, settings: Settings, i: int, base: str | None, q: str) -> str:
+    r = result.items[i]
+    found = [(p, m) for p, m in r.matches.items() if m]
+    exact = [m for _, m in found if m.exact]
+    cheapest = min(exact or [m for _, m in found], key=lambda m: m.offer.price, default=None)
+    found.sort(key=lambda pm: (not pm[1].exact, pm[1].offer.price))
+    labels = []
+    for p, m in found:
+        o = m.offer
+        cls = "best" if m is cheapest else "" if m.exact else "close"
+        flag = ("your pick" if m.pinned else "" if m.exact else "close match")
+        was = f"was {o.regular_price:,.2f}" if o.on_deal else ""
+        flags = ", ".join(x for x in (flag, was) if x)
+        no = "" if m.pinned else _button(base and base + "/reject", q, "not this", {"item": i, "platform": p})
+        labels.append(f"<li class='label {cls}'><div class=shop>{escape(label(settings, p))}</div>"
+                      f"<div class=amount>{o.price:,.2f}</div><div class='muted small'>{_unit(o)}</div>{_link(o, 'product')}"
+                      f"<div class='flag {'close' if not m.exact else ''}'>{escape(flags)}</div>{no}</li>")
+    missing = [label(settings, p) for p in result.platforms if not r.matches.get(p)]
+    state = ""
+    if r.pinned:
+        state = "<span class='state muted'>your product</span>" + _button(base and base + "/forget", q, "change", {"item": i})
+    elif r.needs_pick:
+        state = f"<a class='state pick' href='#pick-{i}'>choose your product</a>"
+    body = f"<ul class=labels>{''.join(labels)}</ul>" if labels else "<p class=muted>No shop had this item.</p>"
+    miss = f"<p class='missing muted'>Not found at {escape(', '.join(missing))}</p>" if labels and missing else ""
+    choose = ""
+    if r.cards and not r.pinned:
+        cards = _cards_html(result, settings, i, base, q)
+        choose = (f"<div id=pick-{i}><h3 class=small style='margin:16px 0 8px'>Which one do you mean?</h3>{cards}</div>"
+                  if r.needs_pick else f"<details class=choose id=pick-{i}><summary>Wrong product? Choose</summary>{cards}</details>")
+    return (f"<section class=line><header><span class=qty>{r.request.qty}×</span><h3>{escape(r.request.query)}</h3>{state}</header>"
+            f"{body}{miss}{choose}</section>")
 
 
 def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapter],
             base: str | None = None, token: str | None = None, learned: dict[str, int] | None = None) -> str:
     """``base`` (like "/r/<id>") turns on the pick / not this / change buttons."""
     q = f"?t={escape(token)}" if token else ""
-    plats = result.platforms
-    head = "".join(f"<th>{escape(label(settings, p))}</th>" for p in plats)
-    body_rows = []
-    for i, r in enumerate(result.items):
-        found = [m for m in r.matches.values() if m]
-        pool = [m for m in found if m.exact] or found  # a cheaper wrong size is not "cheapest"
-        cheapest = min(pool, key=lambda m: m.offer.price).offer.platform if pool else None
-        cells = []
-        for p in plats:
-            m = r.matches.get(p)
-            if not m:
-                cells.append("<td class=muted>—</td>")
-                continue
-            o = m.offer
-            unit = f"<div class=muted>{_unit(o)}</div>" if o.unit_price else ""
-            deal = f" <s class=muted>{o.regular_price:,.2f}</s>" if o.on_deal else ""
-            close = "<div class=muted>your pick</div>" if m.pinned else "" if m.exact else "<div class=close>close match</div>"
-            no = "" if m.pinned else _button(base and base + "/reject", q, "not this", {"item": i, "platform": p})
-            cells.append(f"<td class='{'best' if p == cheapest else ''}'><div class=price>{o.price:,.2f}{deal}</div>"
-                         f"<div class=name><a href='{escape(o.url)}' target='_blank' rel='noopener'>{escape(o.name)}</a></div>{unit}{close}{no}</td>")
-        state = ""
-        if r.pinned:
-            state = "<div class=muted>your product</div>" + _button(base and base + "/forget", q, "change", {"item": i})
-        elif r.needs_pick:
-            state = f"<div class=warn><a href='#pick-{i}'>choose your product</a></div>"
-        body_rows.append(f"<tr><td><b>{r.request.qty} ×</b> {escape(r.request.query)}{state}</td>{''.join(cells)}</tr>")
-
-    plans = ""
-    pending = [i for i, r in enumerate(result.items) if r.needs_pick]
-    if pending:
-        plans += (f"<p class=warn>Not final: several products fit {len(pending)} line(s). Choose yours below; "
-                  "shopper remembers it for next time.</p>")
-    if result.best:
-        plans += _plan_html(result, result.best, settings, adapters, "Best plan")
-        if result.single and result.single is not result.best:
-            plans += _plan_html(result, result.single, settings, adapters, "Best single platform")
-    else:
-        plans = "<p>No platform had an acceptable match.</p>"
+    n = len(result.items)
+    when = result.created_at.astimezone().strftime("%d %b, %H:%M")
+    header = (f"<h1>Basket comparison</h1><p>{n} item{'s' if n != 1 else ''} for {escape(settings.area_name)}, "
+              f"{len(result.platforms)} shops searched, prices from {when}. Check the total in the app before you pay.</p>")
+    pending = [r for r in result.items if r.needs_pick]
+    plan = (_plan_html(result, result.best, settings, adapters) if result.best
+            else "<h2>No plan yet</h2><p class=muted>No shop had an acceptable match for this list.</p>")
+    notice = (f"<p class=notice><b>Not final.</b> Several products fit {len(pending)} line{'s' if len(pending) != 1 else ''}. "
+              "Choose yours below; shopper remembers it for next time.</p>") if pending else ""
     tips = [(r, tip_line(settings, r)) for r in result.items if r.tip]
-    if tips:
-        plans += "<div class=plan><div>Better-value packs</div><ul>" + "".join(
-            f"<li>{escape(r.request.query)}: <a href='{escape(r.tip.offer.url)}' target='_blank' rel='noopener'>"
-            f"{escape(line)}</a></li>" for r, line in tips) + "</ul></div>"
-    picks = ""
-    for i, r in enumerate(result.items):
-        if not r.cards or r.pinned:
-            continue
-        cards = _cards_html(result, settings, i, base, q)
-        title = f"<h3 id=pick-{i}>{escape(r.request.query)}</h3>"
-        picks += (title + cards) if r.needs_pick else (
-            f"<details id=pick-{i}><summary>{escape(r.request.query)}: wrong product? Choose</summary>{cards}</details>")
-    if picks:
-        picks = "<h2>Choose your products</h2>" + picks
+    tips_html = ("<h2>Better-value packs</h2><div class=panel><ul>" + "".join(
+        f"<li>{escape(r.request.query)}: <a href='{escape(r.tip.offer.url)}' target='_blank' rel='noopener'>{escape(line)}</a></li>"
+        for r, line in tips) + "</ul></div>") if tips else ""
+    lines = "".join(_line_html(result, settings, i, base, q) for i in range(n))
     notes = []
     if result.unverified_fees:
-        notes.append("Fees not verified (counted as 0): " + ", ".join(label(settings, p) for p in result.unverified_fees))
+        notes.append("Fees not verified, counted as 0: " + ", ".join(label(settings, p) for p in result.unverified_fees))
     notes += [f"{label(settings, p)}: {e}" for p, e in result.errors.items()]
     notes += [f"{label(settings, p)} prices are from its catalogue snapshot of {t}." for p, t in snapshot_ages(result).items()]
-    notes_html = "".join(f"<p class=warn>{escape(n)}</p>" for n in notes)
-    memo = (f"<p class=muted>Learned so far: {learned['lines']} chosen products, {learned['rejects']} rejected listings, "
-            f"{learned['avoid']} avoided words.</p>") if learned else ""
-    when = result.created_at.astimezone().strftime("%Y-%m-%d %H:%M")
-    body = (f"<h1>Basket comparison</h1><div class=muted>{escape(settings.area_name)} · prices fetched {when} · "
-            f"green = cheapest exact match per item · check the total in the app before paying</div>"
-            f"<h2>Proposal</h2>{plans}{notes_html}{picks}<h2>All prices</h2>"
-            f"<div class=wrap><table><thead><tr><th>Item</th>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody></table></div>{memo}")
-    return page("Basket comparison", body)
+    if learned:
+        notes.append(f"Learned so far: {learned['lines']} chosen product{'s' if learned['lines'] != 1 else ''}, "
+                     f"{learned['rejects']} rejected listing{'s' if learned['rejects'] != 1 else ''}, "
+                     f"{learned['avoid']} avoided word{'s' if learned['avoid'] != 1 else ''}.")
+    notes_html = "<div class='notes muted'>" + "".join(f"<p>{escape(x)}</p>" for x in notes) + "</div>" if notes else ""
+    body = (f"<div class='panel plan'>{plan}</div>{notice}{_one_shop_html(result, settings)}{tips_html}"
+            f"<h2>{'Choose your products and compare' if pending else 'Every price, item by item'}</h2>{lines}{notes_html}")
+    return page("Basket comparison", body, header)
 
 
 def debug_text(result: CompareResult, settings: Settings, top: int = 3) -> str:

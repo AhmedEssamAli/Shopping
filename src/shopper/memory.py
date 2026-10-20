@@ -66,7 +66,7 @@ class ProductCard:
         parts = [self.size or "size not stated", " ".join(sorted(self.forms)) or "pack type not stated"]
         if self.variants:
             parts.append(" ".join(sorted(self.variants)))
-        return " · ".join(parts)
+        return ", ".join(parts)
 
     @property
     def words(self) -> frozenset[str]:

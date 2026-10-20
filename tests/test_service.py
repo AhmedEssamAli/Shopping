@@ -63,7 +63,7 @@ async def test_report_renders(tmp_path):
     text = to_text(r, s, ADAPTERS, "http://x/r/1")
     assert "BEST PLAN: A + B" in text and "Full table: http://x/r/1" in text
     html = to_html(r, s, ADAPTERS)
-    assert "<table>" in html and "https://b/0" in html
+    assert "class=labels" in html and "https://b/0" in html and "If you buy everything in one shop" in html
 
 
 def test_web_token_and_flow(tmp_path):

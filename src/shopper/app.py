@@ -40,8 +40,10 @@ class App:
         self._render(rid)
         while len(self.results) > 50:  # memory only; older pages stay viewable, just without the button
             self.results.pop(next(iter(self.results)))
-        text = to_text(result, self.settings, self.adapters, self.result_url(rid))
-        return result, text, rid
+        return result, self.text(rid), rid
+
+    def text(self, rid: str) -> str:
+        return to_text(self.results[rid], self.settings, self.adapters, self.result_url(rid))
 
     def _render(self, rid: str) -> None:
         html = to_html(self.results[rid], self.settings, self.adapters, base=f"/r/{rid}",

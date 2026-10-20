@@ -9,23 +9,51 @@ Send a message:
   /watch <item> [@ price]  -> alert me when it drops (or reaches the price)
   /watches /unwatch N
   /push              -> add your last best plan to your carts where supported (noon, Amazon)
+
+When several products fit a line (a jar, a pouch, a sachet), the bot asks you to choose
+with buttons. Your choice is remembered for that line, and the plan is sent again.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from .app import App
 from .report import label
+from .service import CompareResult
 from .watcher import best_exact, check_watches, parse_watch
 
 log = logging.getLogger(__name__)
 HELP = __doc__.split("\n\n", 1)[1]
 TG_LIMIT = 4000
+BUTTON_TEXT = 60  # Telegram cuts long button labels
+
+
+def pick_keyboard(core: App, result: CompareResult, rid: str, i: int) -> InlineKeyboardMarkup:
+    """One button per product card: "200g · jar — 300.00 Gourmet, Seoudi"."""
+    rows = []
+    for j, c in enumerate(result.items[i].cards):
+        shops = ", ".join(label(core.settings, p) for p in c.per_platform())
+        text = f"{c.label} — {c.cheapest().price:,.2f} {shops}"
+        rows.append([InlineKeyboardButton(text[:BUTTON_TEXT], callback_data=f"pk:{rid}:{i}:{j}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def parse_callback(data: str) -> tuple[str, str, int, int | None] | None:
+    """"pk:<rid>:<item>:<card>" (pick) or "fg:<rid>:<item>" (choose again)."""
+    parts = (data or "").split(":")
+    try:
+        if parts[0] == "pk" and len(parts) == 4:
+            return "pick", parts[1], int(parts[2]), int(parts[3])
+        if parts[0] == "fg" and len(parts) == 3:
+            return "forget", parts[1], int(parts[2]), None
+    except ValueError:
+        pass
+    return None
 
 
 def build_bot(core: App) -> Application:
@@ -53,13 +81,49 @@ def build_bot(core: App) -> Application:
         await update.effective_chat.send_action(ChatAction.TYPING)
         await reply(update, f"Searching {len(requests)} item(s)…")
         try:
-            result, text, _ = await core.run(requests, exact_only=exact)
+            result, text, rid = await core.run(requests, exact_only=exact)
             core.last_results[update.effective_chat.id] = result
             text += "\nSend /push to add this plan to your carts."
         except Exception as e:
             log.exception("compare failed")
-            text = f"Comparison failed: {type(e).__name__}: {e}"
+            await reply(update, f"Comparison failed: {type(e).__name__}: {e}")
+            return
         await reply(update, text)
+        await ask_picks(update, result, rid)
+
+    async def ask_picks(update: Update, result: CompareResult, rid: str) -> None:
+        for i, r in enumerate(result.items):
+            if r.needs_pick:
+                await update.effective_message.reply_text(
+                    f"Which one do you mean? {r.request.qty} × {r.request.query}",
+                    reply_markup=pick_keyboard(core, result, rid, i))
+
+    async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not ok(update):
+            await query.answer()
+            return
+        parsed = parse_callback(query.data)
+        result = core.results.get(parsed[1]) if parsed else None
+        if not parsed or result is None:
+            await query.answer("This comparison is no longer open. Send the list again.", show_alert=True)
+            return
+        action, rid, i, j = parsed
+        r = result.items[i] if 0 <= i < len(result.items) else None
+        chosen = r.cards[j].label if r and action == "pick" and j is not None and 0 <= j < len(r.cards) else None
+        if not core.feedback(rid, action, i, card=j):
+            await query.answer("That choice is no longer available. Send the list again.", show_alert=True)
+            return
+        await query.answer("Saved")
+        if action == "pick":
+            again = InlineKeyboardMarkup([[InlineKeyboardButton("Choose again", callback_data=f"fg:{rid}:{i}")]])
+            await query.edit_message_text(f"Chosen for {r.request.query}: {chosen}. I will use it next time too.",
+                                          reply_markup=again)
+        else:
+            await query.edit_message_text(f"Which one do you mean? {r.request.qty} × {r.request.query}",
+                                          reply_markup=pick_keyboard(core, result, rid, i))
+        if not any(x.needs_pick for x in result.items):
+            await reply(update, "Updated plan:\n" + core.text(rid))
 
     async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not ok(update):
@@ -157,6 +221,7 @@ def build_bot(core: App) -> Application:
     bot.add_handler(CommandHandler("remove", remove))
     bot.add_handler(CommandHandler("clear", clear))
     bot.add_handler(CommandHandler("compare", compare_saved))
+    bot.add_handler(CallbackQueryHandler(on_button))
     bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     return bot
 
