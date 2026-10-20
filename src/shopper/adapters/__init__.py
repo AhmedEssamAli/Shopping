@@ -3,6 +3,7 @@ from __future__ import annotations
 from ..browser import BrowserSession
 from ..config import Settings
 from .amazon_eg import AmazonEgAdapter
+from .appshop import AppShopAdapter, PriceBook
 from .base import Adapter, NotCalibrated
 from .instashop import InstashopAdapter
 from .magento import gourmet, hyperone, seoudi, spinneys
@@ -26,8 +27,8 @@ def talabat_shops(settings: Settings) -> dict[str, TalabatShopAdapter]:
     return out
 
 
-def build_adapters(settings: Settings, session: BrowserSession | None) -> dict[str, Adapter]:
-    """Every platform in config/platforms.toml, live or not."""
+def build_adapters(settings: Settings, session: BrowserSession | None, book: PriceBook | None = None) -> dict[str, Adapter]:
+    """Every platform in config/platforms.toml, live or not. ``book``: prices typed in from apps."""
     at = (settings.area_lat, settings.area_lon)
     out: dict[str, Adapter] = {"gourmet": gourmet(), "seoudi": seoudi(at), "spinneys": spinneys(at),
                                "hyperone": hyperone(), "metro_markets": MetroAdapter(), **talabat_shops(settings)}
@@ -39,6 +40,10 @@ def build_adapters(settings: Settings, session: BrowserSession | None) -> dict[s
         for name, p in settings.platforms.items():
             if p.options.get("instashop_shop"):
                 out[name] = InstashopAdapter(name, p.label, p.options["slug"], session)
+    if book is not None:
+        for name, p in settings.platforms.items():
+            if p.status == "app":
+                out[name] = AppShopAdapter(name, p.label, book)
     for name in HOME_URLS:
         label = settings.platforms[name].label if name in settings.platforms else name
         out[name] = PendingAdapter(name, label)

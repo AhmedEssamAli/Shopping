@@ -63,12 +63,32 @@ def create_app(core: App) -> FastAPI:
     def q(t: str | None) -> str:
         return f"?t={quote(t)}" if t else ""
 
-    STATUS = {"live": "Live", "browser": "Through Shopping Chrome", "pending": "Not added yet"}
+    STATUS = {"live": "Live", "browser": "Through Shopping Chrome", "app": "From the app: prices you type in",
+              "pending": "Not added yet"}
+
+    def app_prices_html(t: str | None) -> str:
+        shops = {n: p.label for n, p in core.settings.platforms.items() if p.status == "app" and p.enabled}
+        if not shops:
+            return ""
+        options = "".join(f"<option value='{escape(n)}'>{escape(lbl)}</option>" for n, lbl in shops.items())
+        rows = "".join(
+            f"<li><span><b>{escape(shops.get(p, p))}</b> {escape(name)}</span><span><span class=num>{price:,.2f}</span> "
+            f"<span class='muted small'>{_local(at.isoformat())}</span> "
+            f"<form method=post action='/prices/delete{q(t)}' class=inline><input type=hidden name=entry value={i}>"
+            f"<button class=link>Delete</button></form></span></li>"
+            for i, p, name, price, at in core.prices.latest()[:12])
+        return (f"<h2 id=prices>Prices from the apps</h2><form method=post action='/prices/add{q(t)}' class=panel>"
+                f"<p class='muted small' style='margin:0 0 8px'>Breadfast and Rabbit have no website catalogue. Type what "
+                f"the app shows, one per line, like <code>Juhayna skimmed milk 1L = 54.95</code>. Comparisons use these "
+                f"prices for 30 days.</p><p><label>Shop <select name=shop>{options}</select></label></p>"
+                f"<textarea name=lines style='min-height:110px' required></textarea>"
+                f"<div class=actions><button>Save prices</button></div>"
+                + (f"<ul class=list style='margin-top:14px'>{rows}</ul>" if rows else "") + "</form>")
 
     def shops_html() -> str:
         groups: dict[str, list[str]] = {}
         for p in core.settings.platforms.values():
-            if p.enabled or p.status == "pending":
+            if p.enabled or p.status == "pending":  # the page shows what is on and what is missing
                 groups.setdefault(p.status, []).append(p.label)
         rows = "".join(f"<p class=small><b>{escape(STATUS.get(k, k))}</b><br>{escape(', '.join(sorted(v)))}</p>"
                        for k, v in sorted(groups.items(), key=lambda kv: list(STATUS).index(kv[0]) if kv[0] in STATUS else 9))
@@ -115,7 +135,21 @@ def create_app(core: App) -> FastAPI:
         script = ("<script>document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{"
                   "const t=document.getElementById('items');t.value=(t.value.trim()?t.value.trim()+'\\n':'')+b.dataset.line;"
                   "t.focus();b.disabled=true}))</script>")
-        return pwa.add_head(page("Compare a basket", form + saved + past + shops_html() + script, header), t)
+        return pwa.add_head(page("Compare a basket", form + saved + past + app_prices_html(t) + shops_html() + script, header), t)
+
+    @api.post("/prices/{action}")
+    async def app_prices(action: str, shop: str = Form(""), lines: str = Form(""), entry: int = Form(-1),
+                         t: str | None = Query(None)):
+        check(t)
+        from .adapters.appshop import parse_prices
+
+        if action == "add" and shop in core.settings.platforms and core.settings.platforms[shop].status == "app":
+            core.prices.add(shop, parse_prices(lines))
+        elif action == "delete":
+            core.prices.delete(entry)
+        else:
+            raise HTTPException(status_code=404)
+        return RedirectResponse(f"/{q(t)}#prices", status_code=303)
 
     @api.post("/compare")
     async def run(items: str = Form(...), exact: str | None = Form(None), max_orders: int = Form(2), t: str | None = Query(None)):

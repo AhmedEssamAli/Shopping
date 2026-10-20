@@ -5,6 +5,7 @@ import asyncio
 from urllib.parse import quote
 
 from .adapters import build_adapters
+from .adapters.appshop import PriceBook
 from .browser import BrowserSession
 from .memory import Memory, offer_key
 from .config import Settings, load_settings
@@ -26,7 +27,8 @@ class App:
         self.store.merge_lists_into(HOUSEHOLD)
         needs_browser = any(p.status == "browser" for p in self.settings.enabled())
         self.browser = BrowserSession(self.settings) if needs_browser else None
-        self.adapters = build_adapters(self.settings, self.browser)
+        self.prices = PriceBook(self.store.db)  # prices typed in from app-only shops
+        self.adapters = build_adapters(self.settings, self.browser, self.prices)
         self.last_rid: dict[int, str] = {}  # per Telegram chat, for /push
         self.results: dict[str, CompareResult] = {}
         self.push_log: dict[str, list[str]] = {}  # result id -> what its cart push reported, from bot or web

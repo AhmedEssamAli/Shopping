@@ -10,8 +10,6 @@ from .base import Adapter, NotCalibrated
 
 HOME_URLS = {
     "carrefour": "https://www.carrefouregypt.com/",
-    "breadfast": "https://www.breadfast.com",  # app-only: site links to app stores
-    "rabbit": "https://www.rabbitmart.com",
 }
 
 

@@ -17,7 +17,7 @@ It runs on your home PC. You use it from your phone through Telegram. You sign i
 | Instashop shops (Mahmoud ElFar by default) | **search live on the home PC**, tested 2026-10-19 | reads the shop page in Shopping Chrome. shopper types the query, presses Enter and reads the results popup (verified from your dump). The popup has no product links, so offers link to the shop page. The product tiles are verified from your capture. Instashop encrypts its API and requires reCAPTCHA, and shopper does not bypass either |
 | **noon Minutes**, **Amazon Now** | built 2026-10-20, **not verified live** | Shopping Chrome, from the links you gave; a failed search saves the page to `~/.shopper/captures/<shop>/failed-search-*` |
 | Carrefour direct site | not needed | Carrefour comes through talabat |
-| Breadfast, Rabbit | **app only** | their websites have no catalogue |
+| Breadfast, Rabbit | **app shops**, from 2026-10-20 | their websites have no catalogue, so you type the app's price (`/price` in Telegram, or **Prices from the apps** on the home page). Comparisons use each price for 30 days and say how old it is |
 
 Every other shop that was checked, Amazon Now and noon Minutes included, is in [docs/retailers.md](docs/retailers.md), with the next step for each.
 

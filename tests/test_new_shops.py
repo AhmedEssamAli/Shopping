@@ -82,3 +82,45 @@ async def test_quick_shop_generic_reader_on_a_product_grid():
     assert offers[0].regular_price == 55.0 and offers[0].image == "https://img/x.jpg" and offers[0].sku == "N123"
     best = best_match(ItemRequest("Juhayna skimmed milk 1L"), offers)
     assert best.exact
+
+
+async def test_app_shop_prices_from_typed_lines(tmp_path):
+    from shopper.adapters.appshop import AppShopAdapter, PriceBook, parse_prices
+    from shopper.store import Store
+    assert parse_prices("Juhayna skimmed milk 1L = 54.95\nrice 5kg: 210 EGP\nnot a price line\nEggs 30 pcs - 165") == [
+        ("Juhayna skimmed milk 1L", 54.95), ("rice 5kg", 210.0), ("Eggs 30 pcs", 165.0)]
+    book = PriceBook(Store(tmp_path / "db.sqlite3").db)
+    book.add("breadfast", [("Juhayna skimmed milk 1L", 56.0)])
+    book.add("breadfast", [("Juhayna Skimmed Milk 1L", 54.95)])  # newer price for the same product wins
+    offers = await AppShopAdapter("breadfast", "Breadfast", book).search("juhayna skimmed milk")
+    assert [(o.name, o.price) for o in offers] == [("Juhayna Skimmed Milk 1L", 54.95)]
+    assert best_match(ItemRequest("Juhayna skimmed milk 1L"), offers).exact
+
+
+async def test_price_command_and_home_form(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from fastapi.testclient import TestClient
+    from telegram.ext import CommandHandler
+
+    from shopper.app import App
+    from shopper.bot import build_bot
+    from shopper.config import PlatformConfig, Settings
+    from shopper.models import PlatformFees
+    from shopper.web import create_app
+    s = Settings(home=tmp_path, platforms={"rabbit": PlatformConfig("rabbit", "Rabbit", "app", True, PlatformFees())})
+    s.telegram_token, s.allowed_chat_ids, s.web_token = "123456:TEST", {42}, "k"
+    app = App(s)
+    cmd = next(h for h in build_bot(app).handlers[0] if isinstance(h, CommandHandler) and "price" in h.commands)
+    sent = AsyncMock()
+    upd = SimpleNamespace(effective_chat=SimpleNamespace(id=42), callback_query=None,
+                          effective_message=SimpleNamespace(text="/price rabbit Nescafe classic 200g = 255", reply_text=sent))
+    await cmd.callback(upd, None)
+    assert "Saved 1 Rabbit price" in sent.call_args.args[0]
+    client = TestClient(create_app(app))
+    client.post("/prices/add?t=k", data={"shop": "rabbit", "lines": "rice 5kg = 199"})
+    home = client.get("/?t=k").text
+    assert "Prices from the apps" in home and "Nescafe classic 200g" in home and "199.00" in home
+    result, _, _ = await app.run([ItemRequest("Nescafe classic 200g")])
+    assert result.best.assignments[0].offer.price == 255.0

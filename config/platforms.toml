@@ -134,12 +134,22 @@ shops = [
   {slug = "mahmoud-elfar-mivida", label = "Mahmoud ElFar (Instashop)"},
 ]
 
+# App-only shops: no web catalogue, so prices come from what you type in from the app
+# (Telegram: /price breadfast, or the home page). Prices older than 30 days are ignored.
 [breadfast]
 label = "Breadfast"
-status = "pending"   # app-only: website has no shop, only app-store links
-enabled = false
+status = "app"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
 
 [rabbit]
 label = "Rabbit"
-status = "pending"   # app-first; web shop not verified
-enabled = false
+status = "app"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false

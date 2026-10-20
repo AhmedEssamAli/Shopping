@@ -23,8 +23,7 @@ Surveyed on 2026-10-20 for New Cairo / 5th Settlement. Probes ran from a cloud s
 | Carrefour Egypt (own site) | Sends an empty page to scripts (bot protection) | Shopping Chrome, like noon | Low priority: Carrefour already comes through talabat. Add only if its own prices differ | Claude, on request |
 | Kheir Zaman, Zahran, Mahmoud ElFar (Madinaty) | On talabat in some branches | talabat, already built | Run `shopper talabat-shops` on the home PC. If any of them deliver to you, paste its line into `shops = [...]` | You |
 | More Instashop shops | Instashop lists many local supermarkets | Instashop, already built | Tell me the shop page names you use (the part after `/client/` in the link) | You |
-| Breadfast | Website is marketing only; the shop API returned 404 | App only | No web route. Compare by hand, or skip | — |
-| Rabbit | Website is marketing only; says it covers Greater Cairo and Giza | App only | No web route | — |
+| Breadfast, Rabbit | Websites are marketing only; Breadfast's shop API returned 404 | **Added as app shops**: you type the app's price (`/price`, or the home page); used for 30 days | Automatic reading would need an Android emulator on the PC driving the app, which is heavy and against the apps' terms; not planned | You |
 | Lulu (own site) | Cloudflare block from the cloud | Shopping Chrome | Low priority: Lulu already comes through talabat | — |
 | Jumia, 2B, B.TECH (non-grocery) | Jumia and 2B show a Cloudflare challenge; B.TECH pages carry product data | Shopping Chrome (Jumia, 2B); page data (B.TECH) | Add if you want electronics compared. B.TECH is the quickest | Claude, on request |
 | Oscar Grand Stores | Site certificate expired | None for now | Check whether Oscar is on talabat or Instashop | You |

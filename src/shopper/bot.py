@@ -9,6 +9,7 @@ Send a message:
   /watch <item> [@ price]  -> alert me when it drops (or reaches the price)
   /watches           -> your watches, with buttons to stop them
   /push              -> add the last best plan to your carts (noon, Amazon)
+  /price             -> type prices from an app-only shop (Breadfast, Rabbit)
 
 The buttons under the keyboard do the common things. Under each result you get buttons
 to add the plan to your carts, save it as the list, or open the full table. When several
@@ -42,11 +43,13 @@ MENU = ReplyKeyboardMarkup([[COMPARE_LIST, MY_LIST], [WATCHES, HOW]], resize_key
 # When /add or /watch come without text, the bot asks with these, and reads your reply.
 ADD_PROMPT = "Send the lines to add, one item per line."
 WATCH_PROMPT = "Send the item to watch, with a target price if you want one: Nescafe classic 200g @ 250"
+PRICE_PROMPT = "Send {label} prices from the app, one per line, like: Juhayna skimmed milk 1L = 54.95"
 COMMANDS = [
     BotCommand("list", "Show the household list"),
     BotCommand("compare", "Compare the household list"),
     BotCommand("add", "Add lines to the list"),
     BotCommand("push", "Add the last best plan to your carts"),
+    BotCommand("price", "Type prices from Breadfast or Rabbit"),
     BotCommand("watch", "Watch an item's price"),
     BotCommand("watches", "Show your watches"),
     BotCommand("help", "How to use the bot"),
@@ -236,7 +239,10 @@ def build_bot(core: App) -> Application:
             return
         text = update.effective_message.text.strip()
         asked = getattr(getattr(update.effective_message, "reply_to_message", None), "text", "") or ""
-        if asked == ADD_PROMPT:
+        shop = next((n for n, lbl in app_shops().items() if asked == PRICE_PROMPT.format(label=lbl)), None)
+        if shop:
+            await save_prices(update, shop, text)
+        elif asked == ADD_PROMPT:
             await add_lines(update, text)
         elif asked == WATCH_PROMPT:
             await add_watch(update, text)
@@ -289,6 +295,9 @@ def build_bot(core: App) -> Application:
             core.clear_list()
             await query.answer("List cleared")
             await show_list(update, edit=True)
+        elif kind == "ap" and rest in app_shops():
+            await query.answer()
+            await ask_prices(update, rest)
         elif kind == "uw" and rest.isdigit():
             done = core.store.delete_watch(update.effective_chat.id, int(rest))
             await query.answer("Stopped" if done else "That watch is already gone")
@@ -398,12 +407,48 @@ def build_bot(core: App) -> Application:
             return
         await reply(update, "Stopped." if core.store.delete_watch(update.effective_chat.id, wid) else "No such watch.")
 
+    def app_shops() -> dict[str, str]:
+        return {n: p.label for n, p in core.settings.platforms.items() if p.status == "app" and p.enabled}
+
+    async def ask_prices(update: Update, shop: str) -> None:
+        await update.effective_message.reply_text(PRICE_PROMPT.format(label=app_shops()[shop]),
+                                                  reply_markup=ForceReply(input_field_placeholder="item = price"))
+
+    async def save_prices(update: Update, shop: str, text: str) -> None:
+        from .adapters.appshop import parse_prices
+
+        entries = parse_prices(text)
+        if not entries:
+            await reply(update, "No prices found. Send one per line, like: Juhayna skimmed milk 1L = 54.95")
+            return
+        core.prices.add(shop, entries)
+        lines = "\n".join(f"• {n}: {p:,.2f}" for n, p in entries)
+        await reply(update, f"Saved {len(entries)} {app_shops()[shop]} price(s). They count in comparisons for 30 days.\n{lines}")
+
+    async def price(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not ok(update):
+            return
+        shops = app_shops()
+        if not shops:
+            await reply(update, "No app-only shops are enabled in config/platforms.toml.")
+            return
+        words = update.effective_message.text.split(None, 2)
+        shop = next((n for n in shops if len(words) > 1 and words[1].lower() in (n, shops[n].lower())), None)
+        if shop and len(words) > 2:
+            await save_prices(update, shop, words[2])
+        elif shop:
+            await ask_prices(update, shop)
+        else:
+            await update.effective_message.reply_text("Which app?", reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(lbl, callback_data=f"ap:{n}") for n, lbl in shops.items()]]))
+
     async def push(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if ok(update):
             await push_rid(update, core.last_rid.get(update.effective_chat.id))
 
     bot.add_handler(CommandHandler(["start", "help"], start))
     bot.add_handler(CommandHandler("push", push))
+    bot.add_handler(CommandHandler("price", price))
     bot.add_handler(CommandHandler("watch", watch))
     bot.add_handler(CommandHandler("watches", watches))
     bot.add_handler(CommandHandler("unwatch", unwatch))

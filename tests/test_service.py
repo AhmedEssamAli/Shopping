@@ -83,7 +83,7 @@ def test_web_token_and_flow(tmp_path):
 def test_platforms_toml_loads():
     from shopper.config import load_platforms, REPO_ROOT
     plats = load_platforms(REPO_ROOT / "config" / "platforms.toml")
-    assert plats["seoudi"].status == "live" and plats["breadfast"].status == "pending"
+    assert plats["seoudi"].status == "live" and plats["breadfast"].status == "app"
 
 
 def test_bot_builds_offline(tmp_path):

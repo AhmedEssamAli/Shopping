@@ -33,6 +33,18 @@ def snapshot_ages(result: CompareResult, older_than_min: int = 30) -> dict[str, 
     return out
 
 
+def age_notes(result: CompareResult, settings: Settings) -> list[str]:
+    """Where prices are older than this comparison: catalogue snapshots, and prices typed in from apps."""
+    out = []
+    for p, t in snapshot_ages(result).items():
+        cfg = settings.platforms.get(p)
+        if cfg and cfg.status == "app":
+            out.append(f"{label(settings, p)} prices are the ones you typed in from the app (latest {t}).")
+        else:
+            out.append(f"{label(settings, p)} prices are from its catalogue snapshot of {t}.")
+    return out
+
+
 def _egp(x: float) -> str:
     return f"EGP {x:,.2f}"
 
@@ -106,7 +118,7 @@ def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     for p, err in result.errors.items():
         out.append(f"Problem with {label(settings, p)}: {err}")
     out.append(f"Prices fetched {result.created_at.astimezone().strftime('%H:%M')}. Check the total in the app before paying.")
-    out += [f"{label(settings, p)} prices are from its catalogue snapshot of {t}." for p, t in snapshot_ages(result).items()]
+    out += age_notes(result, settings)
     if table_url:
         out.append(f"\nFull table: {table_url}")
     return "\n".join(out)
@@ -156,6 +168,7 @@ def to_chat(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
         out.append("\nFees not counted yet: " + e(", ".join(label(settings, p) for p in result.unverified_fees)))
     for p, err in result.errors.items():
         out.append(f"Problem with {e(label(settings, p))}: {e(err)}")
+    out += [e(x) for x in age_notes(result, settings) if "typed in" in x]
     when = result.created_at.astimezone().strftime("%H:%M")
     out.append(f"Prices from {when}, {len(result.platforms)} shops, {n} item{'s' if n != 1 else ''}. "
                "Check the total in the app before you pay.")
@@ -221,6 +234,7 @@ button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16p
 button.link{background:none;color:inherit;padding:2px 0;font-weight:500;font-size:12px;text-decoration:underline;opacity:.75}
 .notes{margin-top:28px;font-size:13px}.notes p{margin:4px 0}.warn{color:var(--tomato)}
 textarea{width:100%;min-height:180px;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 input[type=number]{font:inherit;width:4em;padding:4px 6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 code{font-size:.9em;background:var(--leaf);padding:1px 5px;border-radius:4px}
 .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}button.quiet{background:var(--leaf);color:var(--ink)}
@@ -377,7 +391,7 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     if result.unverified_fees:
         notes.append("Fees not verified, counted as 0: " + ", ".join(label(settings, p) for p in result.unverified_fees))
     notes += [f"{label(settings, p)}: {e}" for p, e in result.errors.items()]
-    notes += [f"{label(settings, p)} prices are from its catalogue snapshot of {t}." for p, t in snapshot_ages(result).items()]
+    notes += age_notes(result, settings)
     notes += [f"{a.label} prices are for its {a.branch} branch, the one that serves your location (AREA_LAT, AREA_LON)."
               for p, a in adapters.items() if p in result.platforms and getattr(a, "branch", None)]
     if learned:
