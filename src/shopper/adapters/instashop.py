@@ -33,8 +33,10 @@ EXTRACT_JS = """() => {
   // Search results popup opened by Enter.
   const popup = [...document.querySelectorAll('app-search-page nb-list-item')].map(el => {
     const link = el.querySelector('a[href*="/product/"]');
+    const img = el.querySelector('img');
     return {title: txt(el, 'h5'), size: txt(el, '.packagingString'), price: txt(el, '.price'), was: txt(el, was),
-            href: link ? link.href : '', id: link ? link.getAttribute('href').split('/product/')[1] : ''};
+            href: link ? link.href : '', id: link ? link.getAttribute('href').split('/product/')[1] : '',
+            image: img ? (img.currentSrc || img.src || '') : ''};
   });
   // Product tiles on shop and category pages: app-product, or the nearest ancestor of a
   // title that also holds a price.
@@ -43,8 +45,10 @@ EXTRACT_JS = """() => {
       e = e.parentElement; if (e && e.querySelector('.price-txt')) return e; } return null; })()
   ).filter(Boolean))].map(el => {
     const link = el.querySelector('a[href*="/product/"]');
+    const img = el.querySelector('img');
     return {title: txt(el, '.product-title'), size: txt(el, '.product-packaging-string'), price: txt(el, '.price-txt'),
-            was: txt(el, was), href: link ? link.href : '', id: link ? link.getAttribute('href').split('/product/')[1] : ''};
+            was: txt(el, was), href: link ? link.href : '', id: link ? link.getAttribute('href').split('/product/')[1] : '',
+            image: img ? (img.currentSrc || img.src || '') : ''};
   });
   return [...popup, ...tiles].filter(x => x.title && x.price);
 }"""
@@ -114,5 +118,6 @@ class InstashopAdapter(Adapter):
                 platform=self.name, name=f"{title} - {size}" if size else title, price=price,
                 regular_price=was if was and was > price else None,
                 url=r.get("href") or self.login_url, sku=r.get("id", ""), cart_ref=r.get("id", ""),
+                image=r.get("image") if (r.get("image") or "").startswith("http") else "",
             ))
         return out

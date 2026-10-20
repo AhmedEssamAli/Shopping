@@ -118,7 +118,11 @@ def product_cards(request: ItemRequest, offers: list[Offer], avoid: frozenset[st
         card = cards.setdefault(key, ProductCard(size, forms, variants, m.exact))
         card.exact = card.exact or m.exact
         card.offers.append(o)
-    return sorted(cards.values(), key=lambda c: (not c.exact, c.cheapest().price))[:limit]
+    want = request.size
+    def sensible(c: ProductCard) -> bool:  # an 18 g sachet is no answer to "200g"
+        s = c.offers[0].size
+        return c.exact or not (want and s and s.unit == want.unit and not 0.2 <= s.total / want.total <= 5)
+    return sorted((c for c in cards.values() if sensible(c)), key=lambda c: (not c.exact, c.cheapest().price))[:limit]
 
 
 @dataclass

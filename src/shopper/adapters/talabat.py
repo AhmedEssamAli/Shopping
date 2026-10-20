@@ -40,6 +40,19 @@ def _download_lock() -> asyncio.Lock:
     return _locks.setdefault(id(loop), asyncio.Lock())
 
 
+def _first_image(item: dict) -> str:
+    """The item's photo URL. The field name in talabat's data is not verified, so a few are tried."""
+    for k in ("image", "imageUrl", "image_url", "images", "imageUrls"):
+        v = item.get(k)
+        if isinstance(v, list):
+            v = v[0] if v else None
+        if isinstance(v, dict):
+            v = v.get("url") or v.get("src")
+        if isinstance(v, str) and v.startswith("http"):
+            return v
+    return ""
+
+
 class TalabatShopAdapter(Adapter):
     needs_browser = False
 
@@ -97,7 +110,7 @@ class TalabatShopAdapter(Adapter):
         if not data:  # talabat redirects past the last page
             return [], 0
         keep = ("title", "slug", "price", "originalPrice", "sku", "stockAmount")
-        return [{k: i.get(k) for k in keep} for i in data["items"]], int(data.get("pageCount") or 1)
+        return [{**{k: i.get(k) for k in keep}, "image": _first_image(i)} for i in data["items"]], int(data.get("pageCount") or 1)
 
     async def refresh(self) -> dict:
         """Download the whole branch catalogue and save it to the cache file."""
@@ -190,7 +203,7 @@ class TalabatShopAdapter(Adapter):
                 platform=self.name, name=" ".join(it["title"].split()), price=float(it["price"]),
                 regular_price=float(reg) if reg else None,
                 url=f"{base}/{it['slug']}/s/{it['sku']}?aid={self.area_id}",
-                sku=str(it["sku"]), in_stock=(it.get("stockAmount") or 0) > 0, fetched_at=at,
+                sku=str(it["sku"]), in_stock=(it.get("stockAmount") or 0) > 0, fetched_at=at, image=it.get("image") or "",
             ))
         return out
 

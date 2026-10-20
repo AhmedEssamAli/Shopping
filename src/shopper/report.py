@@ -208,6 +208,10 @@ font-weight:700;border-radius:4px;padding:2px 10px;line-height:1.1;font-variant-
 .label .product{display:block;font-size:13px;line-height:1.3;margin-top:4px}
 .flag{font-size:12px;margin-top:4px}.flag.close{color:var(--tomato)}
 .missing{font-size:13px;margin:10px 0 0}
+img.thumb,.thumb.nophoto{display:block;width:100%;height:84px;object-fit:contain;background:#fff;border-radius:4px;margin:0 0 6px}
+.thumb.nophoto{background:repeating-linear-gradient(135deg,var(--leaf) 0 6px,transparent 6px 12px);opacity:.6}
+img.mini{width:36px;height:36px;object-fit:contain;background:#fff;border-radius:4px;flex:none}
+.withimg{display:flex;gap:10px;align-items:center}
 .choices{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:10px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x mandatory}
 .choice{scroll-snap-align:start;border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--card);display:flex;flex-direction:column;gap:6px}
 .choice ul{margin:0;padding-left:18px;font-size:13px}.choice .push{margin-top:auto}
@@ -251,6 +255,14 @@ def _tag(amount: float, big: bool = False) -> str:
     return f"<span class='tag{' big' if big else ''}'><small>EGP</small>{amount:,.2f}</span>"
 
 
+def _img(o, cls: str = "thumb") -> str:
+    """The product photo, loaded from the shop; nothing when the shop gave none."""
+    if not getattr(o, "image", ""):
+        return ""
+    return (f"<img class={cls} src='{escape(o.image)}' alt='' loading=lazy decoding=async referrerpolicy=no-referrer "
+            "onerror=\"this.remove()\">")
+
+
 def _link(o, cls: str = "") -> str:
     return f"<a class='{cls}' href='{escape(o.url)}' target='_blank' rel='noopener'>{escape(o.name)}</a>"
 
@@ -261,7 +273,8 @@ def _plan_html(result: CompareResult, prop: Proposal, settings: Settings, adapte
     bags = []
     for platform in prop.platforms:
         items = "".join(
-            f"<li><span>{m.request.qty} × {_link(m.offer)}{'' if m.exact else ' <span class=warn>close match</span>'}</span>"
+            f"<li><span class=withimg>{_img(m.offer, 'mini')}<span>{m.request.qty} × {_link(m.offer)}"
+            f"{'' if m.exact else ' <span class=warn>close match</span>'}</span></span>"
             f"<span>{m.line_total:,.2f}</span></li>"
             for _, m in sorted(prop.assignments.items()) if m.offer.platform == platform)
         fee = prop.fees[platform]
@@ -300,7 +313,8 @@ def _cards_html(result: CompareResult, settings: Settings, i: int, base: str | N
         best = c.cheapest()
         listings = "".join(f"<li>{escape(label(settings, p))}: {_link(o)}, {o.price:,.2f}</li>" for p, o in c.per_platform().items())
         tag = "" if c.exact else "<span class='warn small'>other size or wording</span>"
-        cards.append(f"<div class=choice><h3>{escape(c.label)}</h3>{tag}<div>{_tag(best.price)} <span class='muted small'>{_unit(best)}</span></div>"
+        pic = next((o for o in c.offers if getattr(o, "image", "")), None)
+        cards.append(f"<div class=choice>{_img(pic) if pic else ''}<h3>{escape(c.label)}</h3>{tag}<div>{_tag(best.price)} <span class='muted small'>{_unit(best)}</span></div>"
                      f"<ul>{listings}</ul><div class=push>{_button(base and base + '/pick', q, 'This one', {'item': i, 'card': c.key}, 'pick')}</div></div>")
     return f"<div class=choices>{''.join(cards)}</div>"
 
@@ -320,7 +334,8 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
         flags = ", ".join(x for x in (flag, was) if x)
         no = "" if m.pinned else _button(base and base + "/reject", q, "not this",
                                          {"item": i, "platform": p, "offer": offer_key(o)})
-        labels.append(f"<li class='label {cls}'><div class=shop>{escape(label(settings, p))}</div>"
+        pic = _img(o) or "<div class='thumb nophoto'></div>"
+        labels.append(f"<li class='label {cls}'>{pic}<div class=shop>{escape(label(settings, p))}</div>"
                       f"<div class=amount>{o.price:,.2f}</div><div class='muted small'>{_unit(o)}</div>{_link(o, 'product')}"
                       f"<div class='flag {'close' if not m.exact else ''}'>{escape(flags)}</div>{no}</li>")
     missing = [label(settings, p) for p in result.platforms if not r.matches.get(p)]

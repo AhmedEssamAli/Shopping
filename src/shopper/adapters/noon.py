@@ -34,8 +34,9 @@ TILES_JS = """() => [...document.querySelectorAll('[data-qa="plp-product-box"]')
     const priceEl = el.querySelector('[data-qa="plp-product-box-price"]');
     const now = priceEl && (priceEl.querySelector('[class*="sellingPrice"] strong, strong') || {}).textContent;
     const was = priceEl && (priceEl.querySelector('[class*="oldPrice"]') || {}).textContent;
+    const img = [...el.querySelectorAll('img')].find(i => i.alt !== 'placeholder' && !/noon-express/.test(i.alt));
     return {href: a ? a.getAttribute('href') : '', name: nameEl ? (nameEl.getAttribute('title') || nameEl.textContent) : '',
-            price: now || '', was: was || ''};
+            price: now || '', was: was || '', image: img ? (img.currentSrc || img.src || '') : ''};
   }).filter(x => x.href && x.name && x.price)"""
 
 ADD_BUTTON = '[data-qa*="add-to-cart" i], button:has-text("Add to cart")'
@@ -53,6 +54,15 @@ def relevance(hits: list[dict], query: str) -> float:
     return sum(any(has_word(w, tokens(h.get("name") or "")) for w in want) for h in hits) / len(hits)
 
 
+def _image(h: dict) -> str:
+    """A photo URL from a tile, or from the catalogue's image_key (noon's CDN path; not verified)."""
+    url = h.get("image") or ""
+    if url.startswith("http"):
+        return url
+    key = h.get("image_key")
+    return f"https://f.nooncdn.com/p/{key}.jpg" if key else ""
+
+
 def tiles_to_hits(rows: list[dict]) -> list[dict]:
     """Rendered tiles -> the same dict shape as the catalogue API's ``hits``."""
     out = []
@@ -65,7 +75,7 @@ def tiles_to_hits(rows: list[dict]) -> list[dict]:
         sku = m.group(1).rstrip("/").split("/")[-2]
         out.append({"offer_code": m.group(2), "sku": sku, "name": " ".join(r["name"].split()), "pdp_url": m.group(1),
                     "price": was if was and now and was > now else now, "sale_price": now if was and now and was > now else None,
-                    "is_buyable": True})
+                    "is_buyable": True, "image": r.get("image", "")})
     return out
 
 
@@ -172,6 +182,7 @@ class NoonAdapter(Adapter):
                 regular_price=float(price) if sale and price else None,
                 url=f"{BASE}{pdp}?o={h['offer_code']}", sku=h.get("sku", ""),
                 in_stock=bool(h.get("is_buyable", True)), cart_ref=h["offer_code"],
+                image=_image(h),
             ))
         return out
 

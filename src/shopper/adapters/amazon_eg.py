@@ -27,7 +27,8 @@ EXTRACT_JS = """() => [...document.querySelectorAll('div[data-component-type="s-
     const now = el.querySelector('.a-price:not(.a-text-price) .a-offscreen');
     const was = el.querySelector('.a-price.a-text-price .a-offscreen');
     const sponsored = !!el.querySelector('.puis-sponsored-label-text, .s-sponsored-label-info-icon');
-    return {asin: el.getAttribute('data-asin'), title: title.trim(),
+    const img = el.querySelector('img.s-image');
+    return {asin: el.getAttribute('data-asin'), title: title.trim(), image: img ? (img.currentSrc || img.src || '') : '',
             price: now ? now.textContent : null, regular: was ? was.textContent : null, sponsored};
   })
   .filter(x => x.asin && x.title)"""
@@ -87,6 +88,7 @@ class AmazonEgAdapter(Adapter):
                     url=f"{BASE}/dp/{r['asin']}",
                     sku=r["asin"],
                     cart_ref=r["asin"],
+                    image=r.get("image") or "",
                 )
             )
         return offers

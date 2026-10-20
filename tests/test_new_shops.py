@@ -47,3 +47,12 @@ def test_incidental_words_do_not_split_one_product():
     offers = [Offer("a", "Nescafe Classic Instant Coffee 200g", 270, "u1"),
               Offer("b", "Nescafe Classic Pure Soluble Coffee 200g", 275, "u2")]
     assert len(product_cards(ItemRequest("Nescafe classic 200g"), offers)) == 1
+
+
+def test_photos_from_metro_and_on_the_page(tmp_path):
+    offers = MetroAdapter().parse((FIX / "metro_search_nescafe.html").read_text(encoding="utf-8"))
+    assert offers[0].image.startswith("https://metro-website-images.s3.eu-west-1.amazonaws.com/")
+    from shopper.report import _img
+    from shopper.models import Offer
+    assert "referrerpolicy=no-referrer" in _img(offers[0]) and _img(Offer("x", "n", 1, "u")) == ""
+    assert "&lt;" in _img(Offer("x", "n", 1, "u", image="https://a/<b>"))

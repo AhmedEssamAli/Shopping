@@ -23,6 +23,7 @@ _CARD_START = '<div class="product-card card" data-id="'
 _FIELDS = {
     "url": re.compile(r'<a href="([^"]+)"'), "name": re.compile(r"<h5>(.*?)</h5>", re.S),
     "now": re.compile(r'<p class="after">(.*?)</p>', re.S), "was": re.compile(r'<p class="before">(.*?)</p>', re.S),
+    "image": re.compile(r'data-src="([^"]+)"'),
 }
 _NUM = re.compile(r"\d+(?:\.\d+)?")
 
@@ -71,7 +72,7 @@ class MetroAdapter(Adapter):
                 continue
             old = _price(html.unescape(was))
             out.append(Offer(self.name, " ".join(html.unescape(name).split()), price, html.unescape(url), sku=pid,
-                             regular_price=old if old and old > price else None))
+                             regular_price=old if old and old > price else None, image=html.unescape(f["image"])))
         return out
 
     async def close(self) -> None:
