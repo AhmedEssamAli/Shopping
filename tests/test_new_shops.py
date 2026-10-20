@@ -207,3 +207,26 @@ async def test_debug_keeps_the_results_page(tmp_path):
         offers = await a.search("Bebeto sour worms")
         await b.close()
     assert offers and len(list((tmp_path / "noon_minutes").glob("search-*/page.html"))) == 1
+
+
+async def test_amazon_now_reads_its_search_tiles():
+    from shopper.adapters.quick import AMAZON_NOW_JS, TILES_JS, amazon_now
+    html = (FIX / "amazon_now_search_milk.html").read_text(encoding="utf-8")
+    url = "https://www.amazon.eg/tez/browse/search?qcbrand=sAuWWBROaG&searchKeyword=Juhayna+skimmed+milk"
+    offers = amazon_now(None).parse(await _rows(html, AMAZON_NOW_JS, url), url)
+    assert len(offers) == 12 and all(o.sku.startswith("B0") and o.url == f"https://www.amazon.eg/dp/{o.sku}" for o in offers)
+    names = [(o.name, o.price) for o in offers[:4]]
+    assert names == [("Juhayna Milk Skimmed 1 Litre, Pack of 6", 330.0), ("Juhayna Milk Skimmed 1 Litre", 56.69),
+                     ("Juhayna Milk 1 Litre, Pack of 6", 325.49), ("Juhayna Milk Skimmed 200ml", 13.0)]
+    last = offers[-1]
+    assert (last.name, last.price, last.regular_price) == ("Almarai Plain Milk Full Cream 1.5 Litres", 79.0, 82.0)
+    assert offers[0].image.startswith("https://m.media-amazon.com/images/I/")
+    m = best_match(ItemRequest("Juhayna skimmed milk 1L"), offers)
+    assert m.exact and m.offer.price == 56.69
+    # The generic tile reader must not read "Pack of 6" + "EGP" as a price of 6.
+    assert all(parse_price(r["price"]) > 10 for r in await _rows(html, TILES_JS, url) if r["price"])
+
+
+def parse_price(t):
+    from shopper.adapters.amazon_eg import parse_price as p
+    return p(t)

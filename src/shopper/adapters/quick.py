@@ -6,8 +6,9 @@ the home PC (2026-10-20):
   to ``/egypt-en/now-product/<sku>/``; NOON_MINUTES_JS reads them. Verified on its home page.
 - Amazon Now (``/tez/browse``) is a Next.js app. Its search page is
   ``/tez/browse/search?qcbrand=...&searchKeyword=...`` (the pattern is in its own page data).
-  Its saved page held no products and no /dp/ links, so its tile layout is not known yet.
-  TILES_JS reads any tile with a picture and an EGP price, link or not.
+  Its tiles have no links; each has an add button carrying the ASIN, a name, a tag such as
+  "Skimmed", a size note and EGP prices. AMAZON_NOW_JS reads them. Verified on a saved search.
+  TILES_JS reads any tile with a picture and an EGP price, link or not, as a fallback.
 
 The search flow: the shop's search URL, then its own search box. Readers, in order: the
 shop's own reader, Amazon result cards, a product link with a price near it, then tiles.
@@ -29,7 +30,7 @@ from .amazon_eg import EXTRACT_JS as AMAZON_CARDS, parse_price
 from .base import Adapter
 
 GENERIC_JS = r"""() => {
-  const price = /(?:EGP|E£|جنيه|ج\.م\.?)\s*[\d٠-٩][\d٠-٩,.]*|[\d٠-٩][\d٠-٩,.]*\s*(?:EGP|E£|جنيه|ج\.م)/;
+  const price = /(?:EGP|E£|جنيه|ج\.م\.?)\s*[\d٠-٩][\d٠-٩,.]*|[\d٠-٩][\d٠-٩,.]*[  ]*(?:EGP|E£|جنيه|ج\.م)/;
   const out = [], seen = new Set();
   for (const a of document.querySelectorAll('a[href]')) {
     const href = a.getAttribute('href') || '';
@@ -56,8 +57,22 @@ NOON_MINUTES_JS = r"""() => [...document.querySelectorAll('a[data-testid^="catal
           price: t('[data-testid=product-price] strong'), was: t('[class*=oldPrice]'), image: img ? img.src : ''};
 })"""
 
+AMAZON_NOW_JS = r"""() => [...document.querySelectorAll('button[data-csa-c-content-id^="AsinFaceout-AddToCart-"]')].map(btn => {
+  const tile = btn.parentElement.closest('div[role=button]') || btn.parentElement;
+  const t = el => ((el && el.innerText) || '').trim();
+  const name = t(tile.querySelector('p[role=heading]')) || btn.getAttribute('data-csa-c-product-title') || '';
+  const kind = t(tile.querySelector('[role=status]'));  // "Skimmed", "Full Cream": not in the name
+  const size = [...tile.querySelectorAll('p[role=note]')].map(t).filter(Boolean).join(' ');
+  const prices = [...tile.querySelectorAll('p[aria-label^="EGP"]')].map(p => p.getAttribute('aria-label'));
+  const img = tile.querySelector('img[src^="http"]');
+  return {asin: btn.getAttribute('data-csa-c-content-id').replace('AsinFaceout-AddToCart-', ''),
+          name: [name, kind && !name.toLowerCase().includes(kind.toLowerCase()) ? kind : '', size].filter(Boolean).join(' '),
+          price: prices[0] || '', was: prices[1] || '', image: img ? img.src : ''};
+})"""
+
 TILES_JS = r"""() => {
-  const price = /(?:EGP|E£|جنيه|ج\.م\.?)\s*[\d٠-٩][\d٠-٩,.]*|[\d٠-٩][\d٠-٩,.]*\s*(?:EGP|E£|جنيه|ج\.م)/;
+  // A number before the currency must be on its line: "Pack of 6" then "EGP 330" is not EGP 6.
+  const price = /(?:EGP|E£|جنيه|ج\.م\.?)\s*[\d٠-٩][\d٠-٩,.]*|[\d٠-٩][\d٠-٩,.]*[  ]*(?:EGP|E£|جنيه|ج\.م)/;
   const found = [];
   for (const img of document.querySelectorAll('img')) {
     let el = img;
@@ -200,4 +215,5 @@ def noon_minutes(session: BrowserSession) -> QuickShopAdapter:
 def amazon_now(session: BrowserSession) -> QuickShopAdapter:
     return QuickShopAdapter("amazon_now", "Amazon Now",
                             "https://www.amazon.eg/-/en/tez/browse?_encoding=UTF8&qcbrand=sAuWWBROaG", session,
-                            search_url="https://www.amazon.eg/tez/browse/search?qcbrand=sAuWWBROaG&searchKeyword={q}")
+                            search_url="https://www.amazon.eg/tez/browse/search?qcbrand=sAuWWBROaG&searchKeyword={q}",
+                            reader=AMAZON_NOW_JS)
