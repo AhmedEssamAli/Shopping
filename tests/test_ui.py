@@ -170,3 +170,13 @@ async def test_add_without_text_asks_then_reads_the_reply(tmp_path):
     update.effective_message.reply_to_message = SimpleNamespace(text=ADD_PROMPT)
     await on_text.callback(update, None)
     assert [(i.qty, i.query) for i in app.list_items()] == [(2, "rice 5kg"), (1, "milk 1L")]
+
+
+async def test_chat_text_links_names_and_escapes(tmp_path):
+    app = core(tmp_path, {"noon": [("Tom & Jerry <Choco> Milk 1L", 30.0)]})
+    _, _, rid = await app.run([ItemRequest("Tom Jerry choco milk 1L")])
+    text = app.chat_text(rid)
+    assert '<a href="https://noon/0">Tom &amp; Jerry &lt;Choco&gt; Milk 1L</a>' in text
+    assert "<b>Best plan: EGP 30.00</b>" in text and "http://127.0.0.1" not in text
+    app.settings.web_base_url = "https://pc.ts.net"
+    assert 'Open the full table</a>' in app.chat_text(rid)

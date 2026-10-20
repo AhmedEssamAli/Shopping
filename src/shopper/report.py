@@ -73,9 +73,8 @@ def _plan_lines(result: CompareResult, prop: Proposal, settings: Settings) -> li
     return lines
 
 
-def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapter], table_url: str | None = None,
-            chat: bool = False) -> str:
-    """``chat``: for Telegram, where products are chosen with buttons under the message."""
+def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapter], table_url: str | None = None) -> str:
+    """Plain text for the CLI. Telegram uses ``to_chat``."""
     n = len(result.items)
     out = [f"{n} item{'s' if n != 1 else ''} · {settings.area_name} · searched {', '.join(label(settings, p) for p in result.platforms)}"]
     best = result.best
@@ -86,8 +85,7 @@ def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
         out.append(f"\nBEST PLAN: {names} — {_egp(best.total)}")
         pending = [r.request.query for r in result.items if r.needs_pick]
         if pending:
-            where = "with the buttons below" if chat else "in the Full table"
-            out.append(f"Not final: several products fit {len(pending)} line(s). Choose yours {where}: "
+            out.append(f"Not final: several products fit {len(pending)} line(s). Choose yours in the Full table: "
                        + "; ".join(pending))
         out += _plan_lines(result, best, settings)
         for platform, link in cart_links(result, best, adapters).items():
@@ -106,7 +104,7 @@ def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     if result.unverified_fees:
         out.append("\nFees not verified (counted as 0): " + ", ".join(label(settings, p) for p in result.unverified_fees))
     for p, err in result.errors.items():
-        out.append(f"⚠ {label(settings, p)}: {err}")
+        out.append(f"Problem with {label(settings, p)}: {err}")
     out.append(f"Prices fetched {result.created_at.astimezone().strftime('%H:%M')}. Check the total in the app before paying.")
     out += [f"{label(settings, p)} prices are from its catalogue snapshot of {t}." for p, t in snapshot_ages(result).items()]
     if table_url:
@@ -119,6 +117,52 @@ def to_text(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
 FONTS = ("<link rel=preconnect href='https://fonts.googleapis.com'><link rel=preconnect href='https://fonts.gstatic.com' crossorigin>"
          "<link rel=stylesheet href='https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700"
          "&family=Schibsted+Grotesk:wght@400;500;700;800&display=swap'>")
+
+def to_chat(result: CompareResult, settings: Settings, adapters: dict[str, Adapter], table_url: str | None = None) -> str:
+    """The result for Telegram, in its HTML subset: product names are links, no bare URLs.
+    Each line is complete on its own, so splitting a long message at line breaks is safe."""
+    e = escape
+    best = result.best
+    n = len(result.items)
+    if not best:
+        out = [e(_no_plan(result))]
+    else:
+        orders = "1 order" if len(best.platforms) == 1 else f"{len(best.platforms)} orders"
+        out = [f"<b>Best plan: {_egp(best.total)}</b>, {orders}"]
+        pending = [r.request.query for r in result.items if r.needs_pick]
+        if pending:
+            out.append(f"<b>Not final.</b> Choose the product for {e('; '.join(pending))} with the buttons below.")
+        for platform in best.platforms:
+            out.append(f"\n<b>{e(label(settings, platform))}</b>  {_egp(best.subtotals[platform] + best.fees[platform])}"
+                       f" (fees {best.fees[platform]:,.2f})")
+            for i, m in sorted(best.assignments.items()):
+                if m.offer.platform != platform:
+                    continue
+                note = "" if m.exact else " <i>close match</i>"
+                if result.items[i].needs_pick:
+                    note += " <i>choose below</i>"
+                out.append(f"• {m.request.qty} × <a href=\"{e(m.offer.url)}\">{e(m.offer.name)}</a> — {m.line_total:,.2f}{note}")
+        single = result.single
+        if single and single is not best:
+            diff = single.total - best.total
+            out.append(f"\nOne shop only: {e(label(settings, single.platforms[0]))} {_egp(single.total)} "
+                       f"({'+' if diff >= 0 else ''}{diff:,.2f})")
+        if best.missing:
+            out.append("Not found anywhere: " + e("; ".join(result.items[i].request.query for i in best.missing)))
+        for r in result.items:
+            if r.tip:
+                out.append(f"Better value: <a href=\"{e(r.tip.offer.url)}\">{e(tip_line(settings, r))}</a>")
+    if result.unverified_fees:
+        out.append("\nFees not counted yet: " + e(", ".join(label(settings, p) for p in result.unverified_fees)))
+    for p, err in result.errors.items():
+        out.append(f"Problem with {e(label(settings, p))}: {e(err)}")
+    when = result.created_at.astimezone().strftime("%H:%M")
+    out.append(f"Prices from {when}, {len(result.platforms)} shops, {n} item{'s' if n != 1 else ''}. "
+               "Check the total in the app before you pay.")
+    if table_url:
+        out.append(f'<a href="{e(table_url)}">Open the full table</a>')
+    return "\n".join(out)
+
 
 CSS = """
 :root{--page:#f4f7f2;--card:#fff;--ink:#1a2b21;--muted:#5d6b62;--line:#dce5da;--basil:#1e5b3a;--basil-ink:#fff;

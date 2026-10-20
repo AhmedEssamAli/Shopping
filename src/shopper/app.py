@@ -9,7 +9,7 @@ from .memory import Memory, offer_key
 from .config import Settings, load_settings
 from .models import ItemRequest
 from .parsing import parse_list
-from .report import to_html, to_text
+from .report import to_chat, to_html, to_text
 from .service import CompareResult, all_offers, assemble, compare
 from .store import Store
 
@@ -58,11 +58,13 @@ class App:
             self.results.pop(next(iter(self.results)))
         return result, self.text(rid), rid
 
-    def text(self, rid: str, chat: bool = False) -> str:
+    def text(self, rid: str) -> str:
+        return to_text(self.results[rid], self.settings, self.adapters, self.result_url(rid))
+
+    def chat_text(self, rid: str) -> str:
+        """Telegram HTML. The table link only when it opens on a phone (https over Tailscale)."""
         url = self.result_url(rid)
-        if chat and not url.startswith("https://"):
-            url = None  # http://127.0.0.1 does not open on the phone; Telegram gets a button instead
-        return to_text(self.results[rid], self.settings, self.adapters, url, chat=chat)
+        return to_chat(self.results[rid], self.settings, self.adapters, url if url.startswith("https://") else None)
 
     def _render(self, rid: str) -> None:
         result = self.results[rid]

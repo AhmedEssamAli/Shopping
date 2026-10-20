@@ -146,11 +146,12 @@ def build_bot(core: App) -> Application:
     def ok(update: Update) -> bool:
         return update.effective_chat.id in allowed
 
-    async def reply(update: Update, text: str, markup=None) -> None:
+    async def reply(update: Update, text: str, markup=None, html: bool = False) -> None:
         parts = chunks(text)
         for k, part in enumerate(parts):
             await update.effective_message.reply_text(
-                part, disable_web_page_preview=True, reply_markup=markup if k == len(parts) - 1 else None)
+                part, disable_web_page_preview=True, reply_markup=markup if k == len(parts) - 1 else None,
+                parse_mode="HTML" if html else None)
 
     async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
@@ -180,7 +181,7 @@ def build_bot(core: App) -> Application:
             except Exception:
                 pass
         core.last_results[update.effective_chat.id] = result
-        await reply(update, core.text(rid, chat=True), result_keyboard(core, result, rid))
+        await reply(update, core.chat_text(rid), result_keyboard(core, result, rid), html=True)
         for i, r in enumerate(result.items):
             if r.needs_pick:
                 await update.effective_message.reply_text(
@@ -301,7 +302,7 @@ def build_bot(core: App) -> Application:
             await query.edit_message_text(f"Which one do you mean? {r.request.qty} × {r.request.query}",
                                           reply_markup=pick_keyboard(core, result, rid, i))
         if not any(x.needs_pick for x in result.items):
-            await reply(update, "Updated plan:\n" + core.text(rid, chat=True), result_keyboard(core, result, rid))
+            await reply(update, "<b>Updated plan</b>\n" + core.chat_text(rid), result_keyboard(core, result, rid), html=True)
 
     async def add(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not ok(update):
