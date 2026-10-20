@@ -216,3 +216,17 @@ def test_unknown_route_and_bad_form_are_pages_and_token_is_encoded(tmp_path):
     assert bad.status_code == 400 and "Part of the form was missing" in bad.text
     home = client.get("/", params={"t": "a+b/c"}).text
     assert "/compare?t=a%2Bb/c" in home and app.result_url("r1").endswith("?t=a%2Bb/c")
+
+
+def test_home_item_rows_compare(tmp_path):
+    app = core(tmp_path)
+    client = TestClient(create_app(app))
+    home = client.get("/?t=k").text
+    assert home.count("class=itemrow") == 3 and "Or paste a list" in home and "Add another item" in home
+    page = client.post("/compare?t=k", data={"item": ["Nescafe classic", ""], "brand": ["", ""], "size": ["200g", ""],
+                                              "pieces": ["", ""], "qty": ["2", ""], "items": ""}, follow_redirects=True)
+    rid = page.url.path.split("/")[-1]
+    r = app.results[rid].items
+    assert [(x.request.query, x.request.qty) for x in r] == [("Nescafe classic 200g", 2)]
+    empty = client.post("/compare?t=k", data={"item": [""], "items": ""})
+    assert empty.status_code == 400 and "Fill in at least one item" in empty.text

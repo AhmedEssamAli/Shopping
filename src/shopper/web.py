@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import pwa
 from .app import App
+from .parsing import compose_item
 from .report import page
 
 
@@ -103,11 +104,19 @@ def create_app(core: App) -> FastAPI:
         chips = ("<p class='muted small' style='margin:12px 0 6px'>Products you chose before</p><div class=chips>"
                  + "".join(f"<button type=button class=chip data-line='{escape(line)}' title='{escape(words)}'>{escape(line)}</button>"
                            for line, words in chosen) + "</div>") if chosen else ""
+        row = ("<div class=itemrow><input name=item placeholder='Item, like skimmed milk' aria-label=Item>"
+               "<input name=brand placeholder='Brand' aria-label=Brand><input name=size placeholder='Size: 1L, 200g' aria-label=Size>"
+               "<input name=pieces inputmode=numeric placeholder='Pieces' aria-label='Pieces in a pack'>"
+               "<input name=qty inputmode=numeric placeholder='How many' aria-label='How many'></div>")
         form = (f"<form method=post action='/compare{q(t)}' class='panel plan'>"
-                f"<label for=items><h2 style='margin:0 0 6px'>Type or paste your list</h2></label>"
-                f"<p class='muted small' style='margin:0 0 10px'>One item per line, quantity first or last: "
+                f"<h2 style='margin:0 0 6px'>What do you want to buy?</h2>"
+                f"<p class='muted small' style='margin:0 0 10px'>One item per row. Brand, size and pieces are optional, "
+                f"and make the match exact: <b>skimmed milk</b>, <b>Juhayna</b>, <b>1L</b>, pieces <b>6</b> for a 6-pack.</p>"
+                f"<div id=rows>{row * 3}</div><button type=button class=quiet id=addrow>Add another item</button>"
+                f"<details class=choose{' open' if chosen else ''}><summary>Or paste a list</summary>"
+                f"<p class='muted small' style='margin:8px 0'>One item per line, quantity first or last: "
                 f"<code>2 Juhayna full cream milk 1L</code> or <code>rice 5kg x1</code>. Arabic works too.</p>"
-                f"<textarea id=items name=items required></textarea>{chips}"
+                f"<textarea id=items name=items></textarea>{chips}</details>"
                 f"<details class=choose><summary>Options</summary>"
                 f"<p class=small><label><input type=checkbox name=exact value=1> Exact matches only</label></p>"
                 f"<p class=small><label>Most orders to split into <input name=max_orders type=number min=1 max=4 "
@@ -132,7 +141,10 @@ def create_app(core: App) -> FastAPI:
             f"<li><a href='/r/{escape(rid)}{q(t)}'>{escape(summary or 'Comparison')}</a>"
             f"<span class='muted small'>{_local(when)}</span></li>" for rid, when, summary in recent)
                 + "</ul></div>") if recent else ""
-        script = ("<script>document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{"
+        script = ("<script>document.getElementById('addrow').addEventListener('click',()=>{const r=document.querySelector('.itemrow')"
+                  ".cloneNode(true);r.querySelectorAll('input').forEach(i=>i.value='');document.getElementById('rows').append(r);"
+                  "r.querySelector('input').focus()});"
+                  "document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{"
                   "const t=document.getElementById('items');t.value=(t.value.trim()?t.value.trim()+'\\n':'')+b.dataset.line;"
                   "t.focus();b.disabled=true}))</script>")
         return pwa.add_head(page("Compare a basket", form + saved + past + app_prices_html(t) + shops_html() + script, header), t)
@@ -151,21 +163,29 @@ def create_app(core: App) -> FastAPI:
             raise HTTPException(status_code=404)
         return RedirectResponse(f"/{q(t)}#prices", status_code=303)
 
+    async def requests_from(items: str, rows: list[list[str]]) -> list:
+        """Rows of the item form first, then any pasted lines."""
+        out = [r for r in (compose_item(*cols) for cols in zip(*rows)) if r] if rows and rows[0] else []
+        return out + (await core.parse_async(items) if items.strip() else [])
+
     @api.post("/compare")
-    async def run(items: str = Form(...), exact: str | None = Form(None), max_orders: int = Form(2), t: str | None = Query(None)):
+    async def run(items: str = Form(""), exact: str | None = Form(None), max_orders: int = Form(2),
+                  item: list[str] = Form([]), brand: list[str] = Form([]), size: list[str] = Form([]),
+                  pieces: list[str] = Form([]), qty: list[str] = Form([]), t: str | None = Query(None)):
         check(t)
-        requests = await core.parse_async(items)
+        requests = await requests_from(items, [item, brand, size, pieces, qty])
         if not requests:
-            raise HTTPException(status_code=400, detail="The list is empty. Type at least one item.")
+            raise HTTPException(status_code=400, detail="The list is empty. Fill in at least one item.")
         _, _, rid = await run_or_explain(requests, max_orders=max_orders, exact_only=bool(exact))
         return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
 
     @api.post("/list/{action}")
     async def household_list(action: str, items: str = Form(""), index: int = Form(-1), line: str | None = Form(None),
-                             t: str | None = Query(None)):
+                             item: list[str] = Form([]), brand: list[str] = Form([]), size: list[str] = Form([]),
+                             pieces: list[str] = Form([]), qty: list[str] = Form([]), t: str | None = Query(None)):
         check(t)
         if action == "add":
-            core.add_to_list(await core.parse_async(items))
+            core.add_to_list(await requests_from(items, [item, brand, size, pieces, qty]))
         elif action == "remove":
             core.remove_from_list(index, line)  # with the line text, a stale tab cannot remove another line
         elif action == "clear":

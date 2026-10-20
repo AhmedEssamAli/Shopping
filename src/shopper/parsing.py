@@ -58,7 +58,8 @@ _SYSTEM = (
     "For each item return one concise English phrase with brand (if given), product, variant and size, and the "
     "quantity to buy. Keep the user's brand and size; do not invent a brand or size they did not give. "
     "Transliterate Egyptian brand names to their usual English spelling (جهينة -> Juhayna, المراعي -> Almarai). "
-    "A size such as 5kg or 1 litre is part of the phrase, not the quantity."
+    "A size such as 5kg or 1 litre is part of the phrase, not the quantity. Pieces in one pack are part of the "
+    "phrase too: a 6-pack of 1 L milk is '6x1L', a tray of 30 eggs is '30 pcs'; the quantity is how many packs."
 )
 
 
@@ -86,3 +87,25 @@ def parse_list(text: str, api_key: str = "") -> list[ItemRequest]:
         except Exception as e:  # network, auth, refusal: the local parser still works
             log.warning("Claude parsing failed, using local parser: %s", e)
     return parse_local(text)
+
+
+def compose_item(item: str, brand: str = "", size: str = "", pieces: str = "", qty: str | int = "") -> ItemRequest | None:
+    """One row of the item form -> an ItemRequest.
+
+    "skimmed milk" + "Juhayna" + "1L" + pieces "6" + qty 2 -> 2 × "Juhayna skimmed milk 6x1L".
+    Pieces alone mean a count in the pack ("eggs", pieces 30 -> "eggs 30 pcs").
+    """
+    item, brand, size, pieces = (" ".join(str(x or "").split()) for x in (item, brand, size, pieces))
+    if not item:
+        return None
+    words = [brand] if brand and brand.lower() not in item.lower() else []
+    words.append(item)
+    if pieces.isdigit() and int(pieces) > 1:
+        words.append(f"{pieces}x{size}" if size else f"{pieces} pcs")
+    elif size:
+        words.append(size)
+    try:
+        n = max(int(str(qty).strip() or 1), 1)
+    except ValueError:
+        n = 1
+    return ItemRequest(" ".join(words), n)

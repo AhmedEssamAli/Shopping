@@ -234,6 +234,9 @@ button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16p
 button.link{background:none;color:inherit;padding:2px 0;font-weight:500;font-size:12px;text-decoration:underline;opacity:.75}
 .notes{margin-top:28px;font-size:13px}.notes p{margin:4px 0}.warn{color:var(--tomato)}
 textarea{width:100%;min-height:180px;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.itemrow{display:grid;grid-template-columns:2fr 1.2fr 1fr .8fr .8fr;gap:8px;margin-bottom:8px}
+.itemrow input,input[type=text]{font:inherit;min-width:0;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+@media (max-width:620px){.itemrow{grid-template-columns:1fr 1fr 1fr}.itemrow input:first-child{grid-column:1/-1}}
 select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 input[type=number]{font:inherit;width:4em;padding:4px 6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 code{font-size:.9em;background:var(--leaf);padding:1px 5px;border-radius:4px}

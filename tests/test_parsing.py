@@ -32,3 +32,12 @@ def test_brand_digits_and_decimal_commas():
     from shopper.parsing import parse_local
     items = parse_local("7up 1L, 2 milk 1,5L")
     assert [(i.qty, i.query) for i in items] == [(1, "7up 1L"), (2, "milk 1,5L")]
+
+
+def test_compose_item_rows():
+    from shopper.parsing import compose_item
+    r = compose_item("skimmed milk", "Juhayna", "1L", "6", "2")
+    assert (r.query, r.qty) == ("Juhayna skimmed milk 6x1L", 2)
+    assert compose_item("Juhayna skimmed milk", "juhayna", "1L").query == "Juhayna skimmed milk 1L"  # brand not repeated
+    assert compose_item("eggs", pieces="30").query == "eggs 30 pcs"
+    assert compose_item("", "Juhayna") is None and compose_item("rice", qty="x").qty == 1
