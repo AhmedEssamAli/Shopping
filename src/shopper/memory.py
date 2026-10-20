@@ -112,6 +112,10 @@ class Memory:
     def __init__(self, db: sqlite3.Connection):
         self.db = db
         self.db.executescript(SCHEMA)
+        try:  # added after the first release: the line as you typed it
+            self.db.execute("ALTER TABLE picks ADD COLUMN query TEXT")
+        except sqlite3.OperationalError:
+            pass
 
     def recall(self, request: ItemRequest) -> Recall:
         key = request_key(request)
@@ -128,8 +132,9 @@ class Memory:
         key, at = request_key(request), now_utc().isoformat()
         canonical = " ".join([request.query, *sorted(chosen.words)])
         self.db.execute("DELETE FROM picks WHERE key=?", (key,))
-        self.db.executemany("INSERT INTO picks VALUES (?,?,?,?,?,?)",
-                            [(key, p, offer_id(o), o.name, canonical, at) for p, o in chosen.per_platform().items()])
+        self.db.executemany("INSERT INTO picks (key, platform, offer_id, name, canonical, at, query) VALUES (?,?,?,?,?,?,?)",
+                            [(key, p, offer_id(o), o.name, canonical, at, request.query)
+                             for p, o in chosen.per_platform().items()])
         passed = {w for c in shown if c is not chosen and c.exact for w in c.words} - chosen.words
         self._words(chosen.words, "picked")
         self._words(passed, "rejected")
@@ -145,6 +150,12 @@ class Memory:
         """Undo the pick for a line (rejects stay), so the cards show again."""
         self.db.execute("DELETE FROM picks WHERE key=?", (request_key(request),))
         self.db.commit()
+
+    def chosen_lines(self, limit: int = 12) -> list[tuple[str, str]]:
+        """(line as typed, chosen product words) for lines you chose a product for, newest first."""
+        rows = self.db.execute("SELECT query, canonical, MAX(at) AS last FROM picks WHERE query IS NOT NULL "
+                               "GROUP BY key ORDER BY last DESC LIMIT ?", (limit,))
+        return [(q, c[len(q):].strip()) for q, c, _ in rows]
 
     def learned(self) -> dict[str, int]:
         """Counts for the page footer: what shopper knows so far."""

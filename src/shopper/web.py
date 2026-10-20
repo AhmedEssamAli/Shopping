@@ -3,6 +3,7 @@ from your phone over Tailscale; links carry WEB_TOKEN so only you can open them.
 from __future__ import annotations
 
 import secrets
+from datetime import datetime
 from html import escape
 
 from fastapi import FastAPI, Form, HTTPException, Query
@@ -11,6 +12,14 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from . import pwa
 from .app import App
 from .report import page
+
+
+def _local(iso: str) -> str:
+    """Saved UTC time as the PC's local time, like "20 Oct, 03:03"."""
+    try:
+        return datetime.fromisoformat(iso).astimezone().strftime("%d %b, %H:%M")
+    except ValueError:
+        return ""
 
 
 def create_app(core: App) -> FastAPI:
@@ -24,29 +33,85 @@ def create_app(core: App) -> FastAPI:
     def q(t: str | None) -> str:
         return f"?t={escape(t)}" if t else ""
 
+    STATUS = {"live": "Live", "browser": "Through Shopping Chrome", "pending": "Not added yet"}
+
+    def shops_html() -> str:
+        groups: dict[str, list[str]] = {}
+        for p in core.settings.platforms.values():
+            if p.enabled or p.status == "pending":
+                groups.setdefault(p.status, []).append(p.label)
+        rows = "".join(f"<p class=small><b>{escape(STATUS.get(k, k))}</b><br>{escape(', '.join(sorted(v)))}</p>"
+                       for k, v in sorted(groups.items(), key=lambda kv: list(STATUS).index(kv[0]) if kv[0] in STATUS else 9))
+        return f"<h2>Shops</h2><div class=panel>{rows}</div>"
+
     @api.get("/", response_class=HTMLResponse)
     async def home(t: str | None = Query(None)):
         check(t)
         header = (f"<h1>What do you need?</h1><p>shopper checks every shop that delivers to "
                   f"{escape(core.settings.area_name)} and finds the cheapest way to buy it.</p>")
-        body = (f"<form method=post action='/compare{q(t)}' class='panel plan'>"
-                f"<label for=items><h2 style='margin:0 0 6px'>Your list</h2></label>"
+        chosen = core.memory.chosen_lines()
+        chips = ("<p class='muted small' style='margin:12px 0 6px'>Products you chose before</p><div class=chips>"
+                 + "".join(f"<button type=button class=chip data-line='{escape(line)}' title='{escape(words)}'>{escape(line)}</button>"
+                           for line, words in chosen) + "</div>") if chosen else ""
+        form = (f"<form method=post action='/compare{q(t)}' class='panel plan'>"
+                f"<label for=items><h2 style='margin:0 0 6px'>Type or paste your list</h2></label>"
                 f"<p class='muted small' style='margin:0 0 10px'>One item per line, quantity first or last: "
-                f"<code>2 Juhayna full cream milk 1L</code> or <code>rice 5kg x1</code>.</p>"
-                f"<textarea id=items name=items required></textarea>"
+                f"<code>2 Juhayna full cream milk 1L</code> or <code>rice 5kg x1</code>. Arabic works too.</p>"
+                f"<textarea id=items name=items required></textarea>{chips}"
+                f"<details class=choose><summary>Options</summary>"
                 f"<p class=small><label><input type=checkbox name=exact value=1> Exact matches only</label></p>"
                 f"<p class=small><label>Most orders to split into <input name=max_orders type=number min=1 max=4 "
-                f"value={core.settings.max_orders}></label></p><button>Compare prices</button></form>")
-        return pwa.add_head(page("Compare a basket", body, header), t)
+                f"value={core.settings.max_orders}></label></p></details>"
+                f"<div class=actions><button>Compare prices</button>"
+                f"<button class=quiet formaction='/list/add{q(t)}'>Add to the list</button></div></form>")
+        items = core.list_items()
+        if items:
+            rows = "".join(f"<li><span><b class=qty>{it.qty}×</b> {escape(it.query)}</span>"
+                           f"<form method=post action='/list/remove{q(t)}' class=inline><input type=hidden name=index value={i}>"
+                           f"<button class=link>Remove</button></form></li>" for i, it in enumerate(items))
+            saved = (f"<h2>The household list</h2><div class=panel><ul class=list>{rows}</ul><div class=actions>"
+                     f"<form method=post action='/list/compare{q(t)}' class=inline><button>Compare the list</button></form>"
+                     f"<form method=post action='/list/clear{q(t)}' class=inline><button class=quiet>Clear the list</button></form>"
+                     f"</div></div>")
+        else:
+            saved = ("<h2>The household list</h2><div class=panel><p class='muted small' style='margin:0'>Empty. Add lines "
+                     "above, send /add in Telegram, or press Save as my list under a result.</p></div>")
+        recent = core.store.recent_results()
+        past = ("<h2>Recent comparisons</h2><div class=panel><ul class=list>" + "".join(
+            f"<li><a href='/r/{escape(rid)}{q(t)}'>{escape(summary or 'Comparison')}</a>"
+            f"<span class='muted small'>{_local(when)}</span></li>" for rid, when, summary in recent)
+                + "</ul></div>") if recent else ""
+        script = ("<script>document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{"
+                  "const t=document.getElementById('items');t.value=(t.value.trim()?t.value.trim()+'\\n':'')+b.dataset.line;"
+                  "t.focus();b.disabled=true}))</script>")
+        return pwa.add_head(page("Compare a basket", form + saved + past + shops_html() + script, header), t)
 
     @api.post("/compare")
     async def run(items: str = Form(...), exact: str | None = Form(None), max_orders: int = Form(2), t: str | None = Query(None)):
         check(t)
         requests = core.parse(items)
         if not requests:
-            raise HTTPException(status_code=400, detail="Empty list")
+            raise HTTPException(status_code=400, detail="The list is empty")
         _, _, rid = await core.run(requests, max_orders=max_orders, exact_only=bool(exact))
         return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
+
+    @api.post("/list/{action}")
+    async def household_list(action: str, items: str = Form(""), index: int = Form(-1), t: str | None = Query(None)):
+        check(t)
+        if action == "add":
+            core.add_to_list(core.parse(items))
+        elif action == "remove":
+            core.remove_from_list(index)
+        elif action == "clear":
+            core.clear_list()
+        elif action == "compare":
+            requests = core.list_items()
+            if requests:
+                _, _, rid = await core.run(requests)
+                return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
+        else:
+            raise HTTPException(status_code=404)
+        return RedirectResponse(f"/{q(t)}", status_code=303)
 
     @api.get("/r/{rid}", response_class=HTMLResponse)
     async def result(rid: str, t: str | None = Query(None)):

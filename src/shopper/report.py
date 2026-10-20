@@ -164,6 +164,11 @@ button.link{background:none;color:inherit;padding:2px 0;font-weight:500;font-siz
 textarea{width:100%;min-height:180px;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 input[type=number]{font:inherit;width:4em;padding:4px 6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 code{font-size:.9em;background:var(--leaf);padding:1px 5px;border-radius:4px}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}button.quiet{background:var(--leaf);color:var(--ink)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{background:var(--card);color:var(--ink);border:1px solid var(--line);
+border-radius:999px;padding:6px 12px;font-weight:500;font-size:14px}.chip:disabled{opacity:.45}
+ul.list{list-style:none;margin:0;padding:0}ul.list li{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+padding:8px 0;border-bottom:1px solid var(--line)}ul.list li:last-child{border-bottom:0}
 @media (max-width:520px){.top h1{font-size:24px}.tag.big{font-size:34px}.shops li{grid-template-columns:1fr auto}.shops .bar{grid-column:1/-1;order:3}}
 @media (prefers-reduced-motion:no-preference){.label.best{animation:pop .5s ease-out 1}@keyframes pop{from{transform:scale(.96)}to{transform:none}}}
 """

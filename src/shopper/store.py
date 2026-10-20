@@ -40,6 +40,10 @@ class Store:
         # One asyncio thread uses this; TestClient and uvicorn may hand calls to another thread.
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.executescript(SCHEMA)
+        try:  # added after the first release
+            self.db.execute("ALTER TABLE results ADD COLUMN summary TEXT")
+        except sqlite3.OperationalError:
+            pass
 
     def record_offers(self, offers: list[Offer]) -> None:
         self.db.executemany(
@@ -56,12 +60,23 @@ class Store:
 
     def save_result(self, html: str) -> str:
         rid = secrets.token_urlsafe(6)
-        self.db.execute("INSERT INTO results VALUES (?,?,?)", (rid, now_utc().isoformat(), html))
+        self.db.execute("INSERT INTO results (id, created_at, html) VALUES (?,?,?)", (rid, now_utc().isoformat(), html))
         self.db.commit()
         return rid
 
-    def update_result(self, rid: str, html: str) -> None:
-        self.db.execute("UPDATE results SET html=? WHERE id=?", (html, rid))
+    def update_result(self, rid: str, html: str, summary: str | None = None) -> None:
+        self.db.execute("UPDATE results SET html=?, summary=COALESCE(?, summary) WHERE id=?", (html, summary, rid))
+        self.db.commit()
+
+    def recent_results(self, limit: int = 5) -> list[tuple[str, str, str]]:
+        """(id, created_at, summary) of the latest comparisons, newest first."""
+        rows = self.db.execute("SELECT id, created_at, COALESCE(summary, '') FROM results WHERE html != '' "
+                               "ORDER BY created_at DESC LIMIT ?", (limit,))
+        return list(rows)
+
+    def merge_lists_into(self, owner: int) -> None:
+        """One household list: older per-chat lists move to ``owner``."""
+        self.db.execute("UPDATE lists SET chat_id=? WHERE chat_id != ?", (owner, owner))
         self.db.commit()
 
     def get_result(self, rid: str) -> str | None:

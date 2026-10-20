@@ -12,11 +12,15 @@ from .service import CompareResult, all_offers, assemble, compare
 from .store import Store
 
 
+HOUSEHOLD = 0  # one shared list for every allowed Telegram chat and the web page
+
+
 class App:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or load_settings()
         self.store = Store(self.settings.db_path)
         self.memory = Memory(self.store.db)
+        self.store.merge_lists_into(HOUSEHOLD)
         needs_browser = any(p.status == "browser" for p in self.settings.enabled())
         self.browser = BrowserSession(self.settings) if needs_browser else None
         self.adapters = build_adapters(self.settings, self.browser)
@@ -46,9 +50,30 @@ class App:
         return to_text(self.results[rid], self.settings, self.adapters, self.result_url(rid))
 
     def _render(self, rid: str) -> None:
-        html = to_html(self.results[rid], self.settings, self.adapters, base=f"/r/{rid}",
+        result = self.results[rid]
+        html = to_html(result, self.settings, self.adapters, base=f"/r/{rid}",
                        token=self.settings.web_token, learned=self.memory.learned())
-        self.store.update_result(rid, html)
+        n = len(result.items)
+        lines = ", ".join(r.request.query for r in result.items[:3]) + ("…" if n > 3 else "")
+        total = f"EGP {result.best.total:,.2f}" if result.best else "no plan"
+        self.store.update_result(rid, html, f"{n} item{'s' if n != 1 else ''}: {lines} — {total}")
+
+    # The household list, shared by Telegram and the web page.
+    def list_items(self) -> list[ItemRequest]:
+        return self.store.get_list(HOUSEHOLD)
+
+    def add_to_list(self, items: list[ItemRequest]) -> None:
+        self.store.add_to_list(HOUSEHOLD, items)
+
+    def save_list(self, items: list[ItemRequest]) -> None:
+        self.store.clear_list(HOUSEHOLD)
+        self.store.add_to_list(HOUSEHOLD, items)
+
+    def remove_from_list(self, index: int) -> bool:
+        return self.store.remove_from_list(HOUSEHOLD, index)
+
+    def clear_list(self) -> None:
+        self.store.clear_list(HOUSEHOLD)
 
     def feedback(self, rid: str, action: str, item: int, card: int | None = None, platform: str | None = None) -> bool:
         """Apply a pick / reject / forget from the comparison page, then re-match the offers

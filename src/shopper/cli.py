@@ -183,7 +183,7 @@ async def _cmd_browser_check(args) -> None:
 async def _cmd_serve(args) -> None:
     import uvicorn
 
-    from .bot import build_bot, watch_loop
+    from .bot import build_bot, setup_menu, watch_loop
     from .web import create_app
 
     app = App()
@@ -194,6 +194,7 @@ async def _cmd_serve(args) -> None:
     if s.telegram_token:
         bot = build_bot(app)
         await bot.initialize()
+        await setup_menu(bot)
         await bot.start()
         await bot.updater.start_polling()
         loop_task = asyncio.create_task(watch_loop(app, bot, s.watch_interval_hours * 3600))
