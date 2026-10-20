@@ -202,7 +202,7 @@ font-weight:700;border-radius:4px;padding:2px 10px;line-height:1.1;font-variant-
 .bag{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}
 .bag .row{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
 .bag ul{list-style:none;margin:8px 0 0;padding:0}.bag li{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:15px}
-.bag li span:last-child,.num{font-family:var(--num);font-size:18px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+.bag li>span:last-child,.num{font-family:var(--num);font-size:18px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
 .alt{margin-top:12px;font-size:14px}
 .notice{border-left:4px solid var(--tomato);background:var(--tomato-bg);border-radius:4px 12px 12px 4px;padding:12px 14px;margin:18px 0 0}
 .notice b{color:var(--tomato)}
@@ -229,7 +229,8 @@ button.yes,button.no{padding:3px 10px;font-size:13px;border-radius:999px}button.
 img.thumb,.thumb.nophoto{display:block;width:100%;height:84px;object-fit:contain;background:#fff;border-radius:4px;margin:0 0 6px}
 .thumb.nophoto{background:repeating-linear-gradient(135deg,var(--leaf) 0 6px,transparent 6px 12px);opacity:.6}
 img.mini{width:36px;height:36px;object-fit:contain;background:#fff;border-radius:4px;flex:none}
-.withimg{display:flex;gap:10px;align-items:center}
+.withimg{display:flex;gap:10px;align-items:center;min-width:0}.withimg>span{min-width:0;overflow-wrap:anywhere}
+.bag li>span:first-child{min-width:0;overflow-wrap:anywhere}main a{overflow-wrap:anywhere}
 .choices{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:10px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x mandatory}
 .choice{scroll-snap-align:start;border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--card);display:flex;flex-direction:column;gap:6px}
 .choice ul{margin:0;padding-left:18px;font-size:13px}.choice .push{margin-top:auto}
@@ -237,6 +238,12 @@ details.choose{margin:10px 0 0}details.choose summary{cursor:pointer;font-size:1
 form.inline{display:inline;margin:0}
 button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:10px 16px;background:var(--basil);color:var(--basil-ink);cursor:pointer}
 button.link{background:none;color:inherit;padding:2px 0;font-weight:500;font-size:12px;text-decoration:underline;opacity:.75}
+.saving{margin:8px 0 0;padding:8px 12px;border-radius:10px;background:var(--leaf);font-size:15px}
+.actionbar{display:none}
+@media (max-width:720px){main{padding-bottom:84px}.actionbar{display:flex;gap:10px;position:fixed;left:0;right:0;bottom:0;
+padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line);z-index:5}
+.actionbar a{flex:1;text-align:center;padding:12px;border-radius:10px;background:var(--leaf);font-weight:700;text-decoration:none}
+.actionbar a.go{background:var(--basil);color:var(--basil-ink)}}
 .notes{margin-top:28px;font-size:13px}.notes p{margin:4px 0}.warn{color:var(--tomato)}
 textarea{width:100%;min-height:180px;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 .itemrow{display:grid;grid-template-columns:2fr 1.2fr 1fr .8fr .8fr;gap:8px;margin-bottom:8px}
@@ -307,8 +314,13 @@ def _plan_html(result: CompareResult, prop: Proposal, settings: Settings, adapte
                     for p, u in cart_links(result, prop, adapters).items())
     missing = ("<p class='warn small'>Not found anywhere: " + escape("; ".join(result.items[i].request.query for i in prop.missing))
                + "</p>") if prop.missing else ""
-    return (f"<div class=head><h2>Best plan</h2>{_tag(prop.total, big=True)}</div>"
-            f"<p class='muted small'>{escape(shops)}, {split}</p>{''.join(bags)}{links}{missing}<!--cart-push-->")
+    single = result.single
+    saving = ""
+    if single and single is not prop and single.total > prop.total and not single.missing:
+        saving = (f"<p class=saving>You save <b>{_egp(single.total - prop.total)}</b> against buying everything at "
+                  f"{escape(label(settings, single.platforms[0]))} ({_egp(single.total)}).</p>")
+    return (f"<div class=head><h2 id=plan>Best plan</h2>{_tag(prop.total, big=True)}</div>"
+            f"<p class='muted small'>{escape(shops)}, {split}</p>{saving}{''.join(bags)}{links}{missing}<!--cart-push-->")
 
 
 def _one_shop_html(result: CompareResult, settings: Settings) -> str:
@@ -414,8 +426,13 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
                      f"{learned['rejects']} rejected listing{'s' if learned['rejects'] != 1 else ''}, "
                      f"{learned['avoid']} avoided word{'s' if learned['avoid'] != 1 else ''}.")
     notes_html = "<div class='notes muted'>" + "".join(f"<p>{escape(x)}</p>" for x in notes) + "</div>" if notes else ""
+    first_pick = next((i for i, r in enumerate(result.items) if r.needs_pick), None)
+    bar = ("<nav class=actionbar>"
+           + (f"<a class=go href='#pick-{first_pick}'>Choose products</a>" if first_pick is not None else
+              "<a class=go href='#plan'>Best plan</a>")
+           + f"<a href='/{q}'>New list</a></nav>") if base else ""
     body = (f"<div class='panel plan'>{plan}</div>{notice}{_one_shop_html(result, settings)}{tips_html}"
-            f"<h2>{'Choose your products and compare' if pending else 'Every price, item by item'}</h2>{lines}{notes_html}")
+            f"<h2>{'Choose your products and compare' if pending else 'Every price, item by item'}</h2>{lines}{notes_html}{bar}")
     return page("Basket comparison", body, header)
 
 
