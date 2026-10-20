@@ -124,3 +124,65 @@ async def test_price_command_and_home_form(tmp_path):
     assert "Prices from the apps" in home and "Nescafe classic 200g" in home and "199.00" in home
     result, _, _ = await app.run([ItemRequest("Nescafe classic 200g")])
     assert result.best.assignments[0].offer.price == 255.0
+
+
+async def _rows(html: str, js: str, url: str = "https://minutes.noon.com/egypt-en/search/?q=x"):
+    import os
+    import pytest
+    chromium = os.environ.get("BROWSER_EXECUTABLE", "/opt/pw-browsers/chromium")
+    if not Path(chromium).exists():
+        pytest.skip("needs Chromium")
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        b = await p.chromium.launch(executable_path=chromium)
+        page = await b.new_page()
+        await page.route("**/*", lambda r: r.fulfill(body=html, content_type="text/html; charset=utf-8"))
+        await page.goto(url)
+        rows = await page.evaluate(js)
+        await b.close()
+    return rows
+
+
+async def test_noon_minutes_reads_its_product_boxes():
+    from shopper.adapters.quick import NOON_MINUTES_JS, noon_minutes
+    rows = await _rows((FIX / "noon_minutes_boxes.html").read_text(encoding="utf-8"), NOON_MINUTES_JS)
+    offers = noon_minutes(None).parse(rows)
+    assert len(offers) == 20
+    candy = next(o for o in offers if o.sku == "Z056694E31609DDFEBF09Z-1")
+    assert candy.name == "Bebeto Sour Worms Jelly Candy 35g"  # brand, name and size
+    assert candy.price == 14.25 and candy.regular_price == 16.75
+    assert candy.url == "https://minutes.noon.com/egypt-en/now-product/Z056694E31609DDFEBF09Z-1/"
+    assert candy.image.startswith("https://f.nooncdn.com/p/pzsku/Z056694E31609DDFEBF09Z/")
+    assert best_match(ItemRequest("Bebeto sour worms 35g"), offers).exact
+
+
+async def test_generic_reader_takes_now_product_links():
+    from shopper.adapters.quick import GENERIC_JS, QuickShopAdapter
+    rows = await _rows('<div><a href="/egypt-en/now-product/Z1-1/"><img src="https://i/1.jpg">'
+                       '<h2>Juhayna Skimmed Milk</h2><span>1L</span><span>EGP</span><strong>52.50</strong></a></div>', GENERIC_JS)
+    offers = QuickShopAdapter("x", "X", "https://minutes.noon.com/egypt-en/", None).parse(rows)
+    assert [(o.price, o.sku) for o in offers] == [(52.5, "Z1-1")]
+
+
+async def test_tile_reader_without_product_links():
+    """Amazon Now draws tiles with click handlers, not links (assumed: its saved page had no /dp/ links)."""
+    from shopper.adapters.quick import TILES_JS, amazon_now
+    html = """<div class=grid>
+      <div class=tile data-asin="B0ABCDEFGH"><img alt="Juhayna Skimmed Milk 1L" src="https://m.media-amazon.com/images/I/a.jpg">
+        <p>Juhayna Skimmed Milk 1L</p><span>EGP 52.50</span><s>EGP 55.00</s><button>Add</button></div>
+      <div class=tile><img alt="Al Doha Rice 5kg" src="https://m.media-amazon.com/images/I/b.jpg">
+        <p>Al Doha Rice 5kg</p><span>E£210</span><button>Add</button></div>
+      <div class=banner><img src="https://m.media-amazon.com/images/I/logo.png"><p>Offers</p></div></div>"""
+    rows = await _rows(html, TILES_JS, "https://www.amazon.eg/tez/browse/search?qcbrand=sAuWWBROaG&searchKeyword=milk")
+    offers = amazon_now(None).parse(rows, "https://www.amazon.eg/tez/browse/search?qcbrand=sAuWWBROaG&searchKeyword=milk")
+    assert [(o.name, o.price) for o in offers] == [("Juhayna Skimmed Milk 1L", 52.5), ("Al Doha Rice 5kg", 210.0)]
+    assert offers[0].sku == "B0ABCDEFGH" and offers[0].url == "https://www.amazon.eg/dp/B0ABCDEFGH"
+    assert offers[0].regular_price == 55.0
+    assert offers[1].url.startswith("https://www.amazon.eg/tez/browse/search?") and offers[1].sku
+
+
+def test_quick_shop_search_urls_and_boxes():
+    from shopper.adapters.quick import SEARCH_BOXES, amazon_now
+    a = amazon_now(None)
+    assert a.search_url == "https://www.amazon.eg/tez/browse/search?qcbrand=sAuWWBROaG&searchKeyword={q}"
+    assert any("looking for" in s for s in SEARCH_BOXES)  # noon Minutes: "What are you looking for?"
