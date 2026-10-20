@@ -80,7 +80,12 @@ class Store:
         if not self.db.execute("SELECT 1 FROM lists WHERE chat_id != ? LIMIT 1", (owner,)).fetchone():
             return
         self.db.execute("DELETE FROM lists")
-        self.db.executemany("INSERT INTO lists VALUES (?,?,?,?)", [(owner, i, q, n) for i, (q, n) in enumerate(rows)])
+        seen, keep = set(), []
+        for q, n in rows:  # the same line from two chats once
+            if q.lower() not in seen:
+                seen.add(q.lower())
+                keep.append((q, n))
+        self.db.executemany("INSERT INTO lists VALUES (?,?,?,?)", [(owner, i, q, n) for i, (q, n) in enumerate(keep)])
         self.db.commit()
 
     def get_result(self, rid: str) -> str | None:

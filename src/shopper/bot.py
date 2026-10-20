@@ -64,11 +64,11 @@ def pick_keyboard(core: App, result: CompareResult, rid: str, i: int) -> InlineK
     return InlineKeyboardMarkup(rows)
 
 
-def result_keyboard(core: App, result: CompareResult, rid: str, pushed: bool = False) -> InlineKeyboardMarkup:
+def result_keyboard(core: App, result: CompareResult, rid: str) -> InlineKeyboardMarkup:
     """Under a result: cart push (once, and only when the plan is final and a shop in it
     supports it), save as list, full table."""
     rows = []
-    if not pushed and core.pushable(result) and not any(r.needs_pick for r in result.items):
+    if rid not in core.push_log and core.pushable(result) and not any(r.needs_pick for r in result.items):
         rows.append([InlineKeyboardButton("Add the plan to my carts", callback_data=f"push:{rid}")])
     rows.append([InlineKeyboardButton("Save as my list", callback_data=f"save:{rid}")])
     url = core.result_url(rid)
@@ -131,6 +131,21 @@ def alert_keyboard(alert) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+async def safe_edit(query, text: str, markup=None) -> None:
+    """Edit a bot message; a repeated tap that changes nothing is not an error."""
+    from telegram.error import BadRequest
+
+    try:
+        await query.edit_message_text(text, reply_markup=markup)
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            raise
+
+
+async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    log.error("Telegram handler failed", exc_info=ctx.error)
+
+
 async def setup_menu(bot: Application) -> None:
     """The "/" menu in Telegram. Best effort: the bot works without it."""
     try:
@@ -180,7 +195,7 @@ def build_bot(core: App) -> Application:
                 await waiting.delete()
             except Exception:
                 pass
-        core.last_results[update.effective_chat.id] = result
+        core.last_rid[update.effective_chat.id] = rid
         await reply(update, core.chat_text(rid), result_keyboard(core, result, rid), html=True)
         for i, r in enumerate(result.items):
             if r.needs_pick:
@@ -193,7 +208,7 @@ def build_bot(core: App) -> Application:
         text = ("\n".join(f"{i + 1}. {it.qty} × {it.query}" for i, it in enumerate(items))
                 or "The list is empty. Add lines with /add, or press Save as my list under a result.")
         if edit and update.callback_query:
-            await update.callback_query.edit_message_text(text[:TG_LIMIT], reply_markup=list_keyboard(items))
+            await safe_edit(update.callback_query, text[:TG_LIMIT], list_keyboard(items))
         else:
             await reply(update, text, list_keyboard(items))
 
@@ -205,16 +220,16 @@ def build_bot(core: App) -> Application:
         text = "\n".join(lines) or "No watches. Add one: /watch Nescafe classic 200g @ 250"
         markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"Stop #{w.id}", callback_data=f"uw:{w.id}")] for w in rows[:LIST_BUTTONS]])
         if edit and update.callback_query:
-            await update.callback_query.edit_message_text(text[:TG_LIMIT], reply_markup=markup)
+            await safe_edit(update.callback_query, text[:TG_LIMIT], markup)
         else:
             await reply(update, text, markup)
 
-    async def push_result(update: Update, result: CompareResult | None) -> None:
-        if not result:
+    async def push_rid(update: Update, rid: str | None) -> None:
+        if not rid:
             await reply(update, "Compare something first, then add it to your carts.")
             return
         await update.effective_chat.send_action(ChatAction.TYPING)
-        await reply(update, "\n".join(await core.push_carts(result)))
+        await reply(update, "\n".join(await core.push_once(rid)))
 
     async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not ok(update):
@@ -251,11 +266,11 @@ def build_bot(core: App) -> Application:
                 await query.answer("This comparison is no longer open. Send the list again.", show_alert=True)
             elif kind == "push":
                 await query.answer("Adding to your carts")
-                try:  # one push per result: a second tap would add everything twice
-                    await query.edit_message_reply_markup(result_keyboard(core, result, rest, pushed=True))
+                try:  # the button goes; push_once also refuses a second push from anywhere
+                    await query.edit_message_reply_markup(result_keyboard(core, result, rest))
                 except Exception:
                     pass
-                await push_result(update, result)
+                await push_rid(update, rest)
             else:
                 core.save_list([r.request for r in result.items])
                 await query.answer("Saved as your list")
@@ -296,11 +311,10 @@ def build_bot(core: App) -> Application:
         await query.answer("Saved")
         if action == "pick":
             again = InlineKeyboardMarkup([[InlineKeyboardButton("Choose again", callback_data=f"fg:{rid}:{i}")]])
-            await query.edit_message_text(f"Chosen for {r.request.query}: {chosen}. I will use it next time too.",
-                                          reply_markup=again)
+            await safe_edit(query, f"Chosen for {r.request.query}: {chosen}. I will use it next time too.", again)
         else:
-            await query.edit_message_text(f"Which one do you mean? {r.request.qty} × {r.request.query}",
-                                          reply_markup=pick_keyboard(core, result, rid, i))
+            await safe_edit(query, f"Which one do you mean? {r.request.qty} × {r.request.query}",
+                            pick_keyboard(core, result, rid, i))
         if not any(x.needs_pick for x in result.items):
             await reply(update, "<b>Updated plan</b>\n" + core.chat_text(rid), result_keyboard(core, result, rid), html=True)
 
@@ -386,7 +400,7 @@ def build_bot(core: App) -> Application:
 
     async def push(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if ok(update):
-            await push_result(update, core.last_results.get(update.effective_chat.id))
+            await push_rid(update, core.last_rid.get(update.effective_chat.id))
 
     bot.add_handler(CommandHandler(["start", "help"], start))
     bot.add_handler(CommandHandler("push", push))
@@ -400,6 +414,7 @@ def build_bot(core: App) -> Application:
     bot.add_handler(CommandHandler("compare", compare_saved))
     bot.add_handler(CallbackQueryHandler(on_button))
     bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    bot.add_error_handler(on_error)
     return bot
 
 

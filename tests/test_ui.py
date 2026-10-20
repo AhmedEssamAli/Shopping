@@ -180,3 +180,39 @@ async def test_chat_text_links_names_and_escapes(tmp_path):
     assert "<b>Best plan: EGP 30.00</b>" in text and "http://127.0.0.1" not in text
     app.settings.web_base_url = "https://pc.ts.net"
     assert 'Open the full table</a>' in app.chat_text(rid)
+
+
+async def test_double_tap_pick_does_not_teach_avoided_words(tmp_path):
+    app = core(tmp_path)
+    result, _, rid = await app.run([COFFEE])
+    jar = next(c.key for c in result.items[0].cards if "jar" in c.forms)
+    assert app.feedback(rid, "pick", 0, card=jar) == "ok"
+    assert app.feedback(rid, "pick", 0, card=jar) == "stale"
+    assert app.memory.avoid_words() == frozenset()
+
+
+async def test_push_once_across_concurrent_taps(tmp_path):
+    import asyncio
+    app = core(tmp_path)
+    calls = []
+
+    async def push(result):
+        calls.append(1)
+        await asyncio.sleep(0.05)
+        return ["added"]
+    app.push_carts = push
+    result, _, rid = await app.run([ItemRequest("rice 5kg")])
+    out = await asyncio.gather(app.push_once(rid), app.push_once(rid))
+    assert len(calls) == 1 and out[0] == ["added"] and out[1][0] == "Already added to your carts:"
+
+
+def test_unknown_route_and_bad_form_are_pages_and_token_is_encoded(tmp_path):
+    app = core(tmp_path)
+    app.settings.web_token = "a+b/c"
+    client = TestClient(create_app(app))
+    page = client.get("/nope")
+    assert page.status_code == 404 and "<html" in page.text
+    bad = client.post("/r/x/pick?t=a%2Bb%2Fc", data={})
+    assert bad.status_code == 400 and "Part of the form was missing" in bad.text
+    home = client.get("/", params={"t": "a+b/c"}).text
+    assert "/compare?t=a%2Bb/c" in home and app.result_url("r1").endswith("?t=a%2Bb/c")

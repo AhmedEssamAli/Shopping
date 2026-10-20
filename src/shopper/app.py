@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from urllib.parse import quote
 
 from .adapters import build_adapters
 from .browser import BrowserSession
@@ -26,12 +27,12 @@ class App:
         needs_browser = any(p.status == "browser" for p in self.settings.enabled())
         self.browser = BrowserSession(self.settings) if needs_browser else None
         self.adapters = build_adapters(self.settings, self.browser)
-        self.last_results: dict[int, CompareResult] = {}  # per Telegram chat, for /push
+        self.last_rid: dict[int, str] = {}  # per Telegram chat, for /push
         self.results: dict[str, CompareResult] = {}
-        self.push_log: dict[str, list[str]] = {}  # result id -> what the web cart push reported  # by result id, for the web page's cart button
+        self.push_log: dict[str, list[str]] = {}  # result id -> what its cart push reported, from bot or web
 
     def result_url(self, rid: str) -> str:
-        token = f"?t={self.settings.web_token}" if self.settings.web_token else ""
+        token = f"?t={quote(self.settings.web_token)}" if self.settings.web_token else ""
         return f"{self.settings.web_base_url}/r/{rid}{token}"
 
     def parse(self, text: str) -> list[ItemRequest]:
@@ -113,7 +114,7 @@ class App:
         r = result.items[item]
         m = r.matches.get(platform) if platform else None
         chosen = next((c for c in r.cards if c.key == card), None)
-        if action == "pick" and chosen:
+        if action == "pick" and chosen and not r.pinned:  # a second tap on "This one" is a no-op
             self.memory.pick(r.request, chosen, r.cards)
         elif action == "reject" and m and not m.pinned and offer_key(m.offer) == offer:
             self.memory.reject(r.request, m.offer)
@@ -124,6 +125,24 @@ class App:
         assemble(result, self.settings, self.adapters, self.memory)
         self._render(rid)
         return "ok"
+
+    async def push_once(self, rid: str) -> list[str]:
+        """Push a result's plan at most once, from any interface: a double tap, a refresh, or
+        the bot and the page together must not add everything twice."""
+        result = self.results.get(rid)
+        if result is None:
+            return ["This comparison is no longer open. Compare the list again."]
+        if rid in self.push_log:
+            return ["Already added to your carts:", *self.push_log[rid]]
+        if any(r.needs_pick for r in result.items):
+            return await self.push_carts(result)  # refuses, and is not recorded, so it can run after the pick
+        self.push_log[rid] = ["Adding to your carts now…"]  # claimed before the first await
+        try:
+            self.push_log[rid] = await self.push_carts(result)
+        except Exception:
+            del self.push_log[rid]
+            raise
+        return self.push_log[rid]
 
     async def push_carts(self, result: CompareResult) -> list[str]:
         """Put the best plan into your real carts where the platform allows it; otherwise say how."""

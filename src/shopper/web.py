@@ -7,8 +7,11 @@ import re
 import secrets
 from datetime import datetime
 from html import escape
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import pwa
@@ -32,8 +35,13 @@ def create_app(core: App) -> FastAPI:
     api = FastAPI(title="shopper", docs_url=None, redoc_url=None)
     token = core.settings.web_token
 
-    @api.exception_handler(HTTPException)
-    async def friendly(request, exc: HTTPException):
+    @api.exception_handler(RequestValidationError)
+    async def missing_field(request, exc):
+        return await friendly(request, HTTPException(status_code=400, detail="Part of the form was missing. "
+                                                     "Go back and try again."))
+
+    @api.exception_handler(StarletteHTTPException)
+    async def friendly(request, exc):
         title = ERRORS.get(exc.status_code, "Something went wrong")
         detail = exc.detail if exc.status_code != 404 and isinstance(exc.detail, str) else (
             "Check the link. Links from the bot and the app carry your access key.")
@@ -53,7 +61,7 @@ def create_app(core: App) -> FastAPI:
             raise HTTPException(status_code=404)
 
     def q(t: str | None) -> str:
-        return f"?t={escape(t)}" if t else ""
+        return f"?t={quote(t)}" if t else ""
 
     STATUS = {"live": "Live", "browser": "Through Shopping Chrome", "pending": "Not added yet"}
 
@@ -165,8 +173,7 @@ def create_app(core: App) -> FastAPI:
         result = core.results.get(rid)
         if result is None:
             raise HTTPException(status_code=410, detail="This comparison is no longer open. Compare the list again.")
-        if rid not in core.push_log:  # once per result: a refresh or double tap must not add everything twice
-            core.push_log[rid] = await core.push_carts(result)
+        await core.push_once(rid)
         return RedirectResponse(f"/r/{rid}/pushed{q(t)}", status_code=303)
 
     @api.get("/r/{rid}/pushed", response_class=HTMLResponse)

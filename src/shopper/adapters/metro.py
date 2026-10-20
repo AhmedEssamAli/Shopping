@@ -19,9 +19,11 @@ from ..models import Offer
 from .base import Adapter
 
 BASE = "https://www.metro-markets.com"
-_CARD = re.compile(
-    r'<div class="product-card card" data-id="(\d+)".*?<a href="([^"]+)".*?<h5>(.*?)</h5>'
-    r'.*?<p class="after">(.*?)</p>\s*<p class="before">(.*?)</p>', re.S)
+_CARD_START = '<div class="product-card card" data-id="'
+_FIELDS = {
+    "url": re.compile(r'<a href="([^"]+)"'), "name": re.compile(r"<h5>(.*?)</h5>", re.S),
+    "now": re.compile(r'<p class="after">(.*?)</p>', re.S), "was": re.compile(r'<p class="before">(.*?)</p>', re.S),
+}
 _NUM = re.compile(r"\d+(?:\.\d+)?")
 
 
@@ -60,9 +62,12 @@ class MetroAdapter(Adapter):
 
     def parse(self, page: str) -> list[Offer]:
         out = []
-        for pid, url, name, now, was in _CARD.findall(page):
+        for block in page.split(_CARD_START)[1:]:  # each card on its own: a missing field never borrows the next card's
+            pid = block.split('"', 1)[0]
+            f = {k: (m.group(1) if (m := rx.search(block)) else "") for k, rx in _FIELDS.items()}
+            url, name, now, was = f["url"], f["name"], f["now"], f["was"]
             price = _price(html.unescape(now))
-            if price is None:
+            if price is None or not name or not pid.isdigit():
                 continue
             old = _price(html.unescape(was))
             out.append(Offer(self.name, " ".join(html.unescape(name).split()), price, html.unescape(url), sku=pid,

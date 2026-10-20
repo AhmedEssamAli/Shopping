@@ -83,3 +83,12 @@ def test_moves_an_item_to_meet_a_minimum_order():
     best = optimise(matches, 3, fees)[0]
     assert best.platforms == ("A", "B") and round(best.total, 2) == 160.0
     assert best.assignments[0].offer.platform == "A"
+
+
+def test_minimum_move_never_starves_the_other_shop():
+    def m(p, i, price):
+        return Match(ItemRequest(f"item {i}"), Offer(p, f"x{i}", price, "u"), 100, True)
+    matches = {"A": {0: m("A", 0, 100), 1: m("A", 1, 10)}, "B": {0: m("B", 0, 101), 1: m("B", 1, 11), 2: m("B", 2, 89)}}
+    fees = {"A": PlatformFees(min_order=100), "B": PlatformFees(min_order=100)}
+    best = optimise(matches, 3, fees)[0]
+    assert best.platforms == ("A", "B") and round(best.total, 2) == 200.0

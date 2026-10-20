@@ -30,3 +30,20 @@ def test_new_shops_configured():
     plats = load_platforms(REPO_ROOT / "config" / "platforms.toml")
     assert plats["metro_markets"].enabled and plats["metro_markets"].status == "live"
     assert not plats["hyperone"].enabled  # no New Cairo branch found yet
+
+
+def test_metro_card_without_price_is_skipped_not_shifted():
+    page = (FIX / "metro_search_nescafe.html").read_text(encoding="utf-8")
+    first = page.index('<p class="after">')
+    broken = page[:first] + page[page.index("</p>", first) + 4:]
+    offers = MetroAdapter().parse(broken)
+    assert len(offers) == 11 and all(o.sku != "5485" for o in offers)
+    assert next(o for o in offers if o.sku == "5486").price == 279.99
+
+
+def test_incidental_words_do_not_split_one_product():
+    from shopper.memory import product_cards
+    from shopper.models import Offer
+    offers = [Offer("a", "Nescafe Classic Instant Coffee 200g", 270, "u1"),
+              Offer("b", "Nescafe Classic Pure Soluble Coffee 200g", 275, "u2")]
+    assert len(product_cards(ItemRequest("Nescafe classic 200g"), offers)) == 1

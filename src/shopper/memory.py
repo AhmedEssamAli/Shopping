@@ -29,8 +29,7 @@ FORM_WORDS = {
 # Words that name a different kind of the same thing ("basmati" vs "egyptian" rice). They
 # split cards, so a short line like "rice 5kg" asks which one, but never block a match.
 KIND_WORDS = {
-    "basmati", "jasmine", "egyptian", "brown", "white", "parboiled", "sella", "wholegrain", "wholemeal",
-    "multigrain", "decaf", "gold", "classic", "original", "extra", "virgin", "pure", "raw", "roasted",
+    "basmati", "jasmine", "egyptian", "brown", "parboiled", "sella", "wholegrain", "wholemeal", "multigrain", "decaf",
 }
 AVOID_AFTER = 2  # rejections of a word, with no pick, before it blocks exact matches
 

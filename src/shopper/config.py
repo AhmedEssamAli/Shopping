@@ -85,6 +85,12 @@ def load_platforms(path: Path) -> dict[str, PlatformConfig]:
     return out
 
 
+def _saved_token(home: Path) -> str:
+    """The key `shopper serve` created when WEB_TOKEN was empty."""
+    path = home / "web_token"
+    return path.read_text().strip() if path.exists() else ""
+
+
 def load_settings(platforms_file: Path | None = None) -> Settings:
     load_dotenv(REPO_ROOT / ".env")
     env = os.environ.get
@@ -103,7 +109,7 @@ def load_settings(platforms_file: Path | None = None) -> Settings:
         anthropic_key=env("ANTHROPIC_API_KEY", ""),
         web_host=env("WEB_HOST", "127.0.0.1"),
         web_port=int(env("WEB_PORT", "8765")),
-        web_base_url=env("WEB_BASE_URL", "http://127.0.0.1:8765").rstrip("/"),
-        web_token=env("WEB_TOKEN", ""),
+        web_base_url=(env("WEB_BASE_URL", "") or f"http://{env('WEB_HOST', '127.0.0.1')}:{env('WEB_PORT', '8765')}").rstrip("/"),
+        web_token=env("WEB_TOKEN", "") or _saved_token(home),
         watch_interval_hours=float(env("WATCH_INTERVAL_HOURS", "6")),
     )

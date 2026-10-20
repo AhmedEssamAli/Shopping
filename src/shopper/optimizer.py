@@ -54,7 +54,8 @@ def _meet_minimums(platforms: tuple[str, ...], matches: dict[str, dict[int, Matc
         need = fees.get(p, PlatformFees()).min_order
         while 0 < need and subtotal(p) < need:
             moves = [(matches[p][i].line_total - m.line_total, i) for i, m in assignments.items()
-                     if m.offer.platform != p and i in matches.get(p, {}) and (matches[p][i].exact or not m.exact)]
+                     if m.offer.platform != p and i in matches.get(p, {}) and (matches[p][i].exact or not m.exact)
+                     and subtotal(m.offer.platform) - m.line_total >= fees.get(m.offer.platform, PlatformFees()).min_order]
             if not moves:
                 break
             _, i = min(moves)
