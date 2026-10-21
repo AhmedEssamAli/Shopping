@@ -1,0 +1,102 @@
+{
+ "pageProps": {
+  "initialState": {
+   "groceryStore": {
+    "branchName": "talabat mart, Tagammoa 5 - South Investors",
+    "branchId": "793312",
+    "deliveryFee": 0,
+    "minimumOrderValue": 40,
+    "isDarkStore": true
+   },
+   "categories": [
+    {
+     "slug": "milk",
+     "name": "Milk",
+     "subCategories": [
+      {
+       "slug": "milk-multipacks",
+       "name": "Milk Multipacks",
+       "count": 29
+      },
+      {
+       "slug": "fresh-milk",
+       "name": "Fresh Milk",
+       "count": 27
+      },
+      {
+       "slug": "long-life-milk",
+       "name": "Long Life Milk",
+       "count": 23
+      },
+      {
+       "slug": "milk-alternatives",
+       "name": "Milk Alternatives",
+       "count": 17
+      },
+      {
+       "slug": "powdered-milk",
+       "name": "Powdered Milk",
+       "count": 19
+      },
+      {
+       "slug": "evaporated-milk",
+       "name": "Evaporated Milk",
+       "count": 1
+      },
+      {
+       "slug": "condensed-milk",
+       "name": "Condensed Milk",
+       "count": 2
+      }
+     ]
+    },
+    {
+     "slug": "coffee-tea",
+     "name": "Coffee & Tea",
+     "subCategories": [
+      {
+       "slug": "hot-bevs-multipacks",
+       "name": "Hot Bevs Multipacks",
+       "count": 18
+      },
+      {
+       "slug": "coffee",
+       "name": "Coffee",
+       "count": 282
+      },
+      {
+       "slug": "black-tea",
+       "name": "Black Tea",
+       "count": 76
+      },
+      {
+       "slug": "green-herbal-tea",
+       "name": "Green & Herbal Tea",
+       "count": 76
+      },
+      {
+       "slug": "karak-adan",
+       "name": "Karak & Adan",
+       "count": 4
+      },
+      {
+       "slug": "creamers",
+       "name": "Creamers",
+       "count": 3
+      },
+      {
+       "slug": "coffee-syrups",
+       "name": "Coffee Syrups",
+       "count": 3
+      },
+      {
+       "slug": "ready-to-drink",
+       "name": "Ready To Drink",
+       "count": 23
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

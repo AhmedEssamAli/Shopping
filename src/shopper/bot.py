@@ -1,0 +1,856 @@
+"""Telegram bot. Long polling, so the home PC needs no open port.
+
+Send a message:
+  one line           -> compare that item now
+  several lines      -> compare that basket now
+  /add <lines>       -> add to the household list
+  /add (no text)     -> add one item step by step: item, brand, type, size, pieces, how many
+  /list              -> the list, with buttons to remove lines, compare or clear
+  /compare [exact]   -> compare the list
+  /lists             -> saved lists; /lists save Weekly keeps a copy of the list
+  /watch <item> [@ price]  -> alert me when it drops (or reaches the price)
+  /watches           -> your watches, with buttons to stop them
+  /push              -> add the last best plan to your carts (noon, Amazon)
+  /price             -> type prices from an app-only shop (Breadfast, Rabbit)
+  a screenshot       -> of Breadfast or Rabbit search results: the bot reads the prices
+
+Each item has six fields, in this order: how many, brand, type, item, pieces x size.
+"2 Juhayna skimmed milk 6x1L" is 2 six-packs of 1 L Juhayna skimmed milk. Fields you give must
+match; fields you leave out are open (no brand = any brand). The bot shows how it read each line.
+
+The buttons under the keyboard do the common things. Under each result you get buttons
+to add the plan to your carts, save it as the list, or open the full table. When several
+products fit a line (a jar, a pouch, a sachet), the bot asks which one you mean.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+import zlib
+
+from telegram import (BotCommand, ForceReply, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update)
+from telegram.constants import ChatAction
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+
+from .app import App
+from .entry import Entry, entry_of, read_entry, size_text, suggest
+from .units import parse_size
+from .report import label
+from .service import CompareResult
+from .watcher import best_exact, check_watches, parse_watch
+
+log = logging.getLogger(__name__)
+HELP = __doc__.split("\n\n", 1)[1]
+TG_LIMIT = 4000  # Telegram allows 4096 characters per message
+BUTTON_TEXT = 60  # Telegram cuts long button labels
+LIST_BUTTONS = 20  # remove buttons shown under /list
+
+# The keyboard that stays under the text box. Its buttons arrive as plain text.
+COMPARE_LIST, MY_LIST, WATCHES, HOW = "Compare my list", "My list", "My watches", "How to use"
+ADD_ITEM = "Add an item"
+MENU = ReplyKeyboardMarkup([[COMPARE_LIST, MY_LIST], [ADD_ITEM, WATCHES], [HOW]], resize_keyboard=True, is_persistent=True,
+                           input_field_placeholder="Type an item or paste a list")
+MENU_BUTTONS = {COMPARE_LIST, MY_LIST, WATCHES, HOW, ADD_ITEM}
+
+# Step-by-step add: one question per field of the entry (see entry.py).
+STEPS = ("item", "brand", "type", "size", "pieces", "qty")
+ASK = {
+    "item": "Step 1 of 6. What is the item? Like milk, rice, instant coffee.\nTo add several, paste them one per line.",
+    "brand": "Step 2 of 6. Which brand? Tap one, type another, or tap Any brand.",
+    "type": "Step 3 of 6. Which type, flavour or grade? Like skimmed, full cream, basmati.",
+    "size": "Step 4 of 6. Size of one piece? Like 1L, 200ml, 500g, 5kg.",
+    "pieces": "Step 5 of 6. Pieces in one pack? 6 for a 6-pack, 30 for a tray of eggs.",
+    "qty": "Step 6 of 6. How many packs?",
+}
+OPEN = {"brand": "Any brand", "type": "Any type", "size": "Any size", "pieces": "Single piece"}
+FIXED = {"pieces": ["2", "4", "6", "12", "24", "30"], "qty": ["1", "2", "3", "4", "5", "6"]}
+WIZARD_MINUTES = 15  # an unfinished step-by-step add expires; plain text then compares again
+# When /add or /watch come without text, the bot asks with these, and reads your reply.
+ADD_PROMPT = "Send the lines to add, one item per line."
+WATCH_PROMPT = "Send the item to watch, with a target price if you want one: Nescafe classic 200g @ 250"
+PRICE_PROMPT = ("Send {label} prices from the app, one per line, like: Juhayna skimmed milk 1L = 54.95\n"
+                "Or send a screenshot of the app's search results with the caption {name}.")
+COMMANDS = [
+    BotCommand("list", "Show the household list"),
+    BotCommand("compare", "Compare the household list"),
+    BotCommand("add", "Add lines to the list"),
+    BotCommand("lists", "Saved lists (Weekly, Monthly)"),
+    BotCommand("push", "Add the last best plan to your carts"),
+    BotCommand("price", "Type prices from Breadfast or Rabbit"),
+    BotCommand("watch", "Watch an item's price"),
+    BotCommand("watches", "Show your watches"),
+    BotCommand("help", "How to use the bot"),
+]
+
+
+def pick_keyboard(core: App, result: CompareResult, rid: str, i: int) -> InlineKeyboardMarkup:
+    """One button per product card: "200g, jar — 300.00 Gourmet, Seoudi"."""
+    rows = []
+    for j, c in enumerate(result.items[i].cards):
+        shops = ", ".join(label(core.settings, p) for p in c.per_platform())
+        other = "" if c.exact else " (other size)"
+        text = f"{c.label}{other} — {c.cheapest().price:,.2f} {shops}"
+        rows.append([InlineKeyboardButton(text[:BUTTON_TEXT], callback_data=f"pk:{rid}:{i}:{c.key}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def result_keyboard(core: App, result: CompareResult, rid: str) -> InlineKeyboardMarkup:
+    """Under a result: cart push (once, and only when the plan is final and a shop in it
+    supports it), save as list, full table."""
+    rows = []
+    if rid not in core.push_log and core.pushable(result) and not any(r.needs_pick for r in result.items):
+        rows.append([InlineKeyboardButton("Add the plan to my carts", callback_data=f"push:{rid}")])
+    rows.append([InlineKeyboardButton("Save as my list", callback_data=f"save:{rid}")])
+    url = core.result_url(rid)
+    if url.startswith("https://"):  # Telegram refuses links to 127.0.0.1
+        rows.append([InlineKeyboardButton("Open the full table", url=url)])
+    return InlineKeyboardMarkup(rows)
+
+
+def line_tag(query: str) -> str:
+    """Short fingerprint of a list line, so a stale Remove button cannot hit another line."""
+    return f"{zlib.crc32(query.encode()) & 0xFFFF:04x}"
+
+
+CHECK_LINES = 8  # lines asked "right product?" under one result
+
+
+def check_keyboard(result: CompareResult, rid: str) -> InlineKeyboardMarkup | None:
+    """"Right product?" Yes / No per line of the plan that you have not chosen a product for."""
+    from .learner import confidence_label
+    from .memory import offer_key
+
+    rows = []
+    best = result.best
+    for i, r in enumerate(result.items):
+        m = best.assignments.get(i) if best else None
+        if not m or r.pinned or r.needs_pick or len(rows) >= CHECK_LINES:
+            continue
+        conf = f" ({confidence_label(r.confidence)})" if r.confidence is not None else ""
+        key = f"{rid}:{i}:{m.offer.platform}:{offer_key(m.offer)}"
+        rows.append([InlineKeyboardButton(f"Yes: {m.offer.name}"[:BUTTON_TEXT - 8] + conf, callback_data=f"cf:{key}"),
+                     InlineKeyboardButton("No", callback_data=f"dn:{key}")])
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+def list_keyboard(items) -> InlineKeyboardMarkup:
+    """One row per line: "2 −", "2 +", "Remove 2" (keyed by the line's text), then Compare and Clear."""
+    n = min(len(items), LIST_BUTTONS)
+    rows = [[InlineKeyboardButton(f"{i + 1}  −", callback_data=f"lq:{i}:{line_tag(items[i].query)}:-1"),
+             InlineKeyboardButton(f"{i + 1}  +", callback_data=f"lq:{i}:{line_tag(items[i].query)}:1"),
+             InlineKeyboardButton(f"Remove {i + 1}", callback_data=f"rm:{i}:{line_tag(items[i].query)}")]
+            for i in range(n)]
+    if items:
+        rows.append([InlineKeyboardButton("Compare the list", callback_data="cmp"),
+                     InlineKeyboardButton("Clear the list", callback_data="clr")])
+    return InlineKeyboardMarkup(rows)
+
+
+def wizard_keyboard(step: str, options: list[str]) -> InlineKeyboardMarkup:
+    """Choices for one step ("wz:<step>:<index>"), the open choice ("wz:<step>:-") and Cancel."""
+    opts = (FIXED.get(step) or options)[:9]
+    rows = [[InlineKeyboardButton(o[:BUTTON_TEXT], callback_data=f"wz:{step}:{k + i}") for i, o in enumerate(opts[k:k + 3])]
+            for k in range(0, len(opts), 3)]
+    last = [InlineKeyboardButton(OPEN[step], callback_data=f"wz:{step}:-")] if step in OPEN else []
+    rows.append(last + [InlineKeyboardButton("Cancel", callback_data="wz:x")])
+    return InlineKeyboardMarkup(rows)
+
+
+DONE_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("Add to the list", callback_data="wz:add"), InlineKeyboardButton("Compare now", callback_data="wz:cmp")],
+    [InlineKeyboardButton("Start over", callback_data="wz:new"), InlineKeyboardButton("Cancel", callback_data="wz:x")]])
+
+
+def set_field(e: Entry, step: str, value: str) -> bool:
+    """Put a typed or tapped value into the entry. False when it does not fit the step."""
+    value = " ".join(value.split())
+    if step == "item":
+        if not value:
+            return False
+        typed = read_entry(value)  # "Juhayna skimmed milk 1L" typed at step 1 fills those fields too
+        e.item, e.brand, e.type = typed.item, typed.brand or e.brand, typed.type or e.type
+        e.size, e.pieces = typed.size or e.size, typed.pieces if typed.pieces > 1 else e.pieces
+    elif step == "size":
+        found = parse_size(value)
+        if not found:
+            return False
+        if found.unit == "pcs":
+            e.pieces = int(found.amount)
+        else:
+            e.size = size_text(found)
+            e.pieces = found.pack if found.pack > 1 else e.pieces
+    elif step in ("pieces", "qty"):
+        if not value.isdigit() or not 0 < int(value) < 1000:
+            return False
+        setattr(e, step, int(value))
+    else:
+        setattr(e, step, value.lower() if step == "type" else value)
+    return True
+
+
+def order_messages(core: App, result: CompareResult, rid: str) -> list[tuple[str, InlineKeyboardMarkup]]:
+    """One message per order of the best plan, largest first: its lines as a copyable list, and buttons."""
+    from .report import shop_link
+    best = result.best
+    if not best or len(best.platforms) < 1:
+        return []
+    done = core.done.get(rid, set())
+    order = sorted(best.platforms, key=lambda p: -best.subtotals[p])
+    out = []
+    for k, p in enumerate(order, 1):
+        ms = [m for _, m in sorted(best.assignments.items()) if m.offer.platform == p]
+        a = core.adapters.get(p)
+        name = label(core.settings, p)
+        lines = "\n".join(f"{m.request.qty} × {m.offer.name}  {m.line_total:,.2f}" for m in ms)
+        text = (f"Order {k} of {len(order)} · {name} — EGP {best.subtotals[p] + best.fees[p]:,.2f}"
+                f"{'  ✓ placed' if p in done else ''}\n{lines}\nFees {best.fees[p]:,.2f}")
+        row = []
+        if a and a.supports_cart_push and (rid, p) not in core.shop_pushes and rid not in core.push_log:
+            row.append(InlineKeyboardButton("Add to cart", callback_data=f"ps:{rid}:{p}"[:64]))
+        link = shop_link(p, [(m.offer, m.request.qty) for m in ms], core.adapters)
+        if link.startswith("https://"):
+            row.append(InlineKeyboardButton(f"Open {name}"[:BUTTON_TEXT], url=link))
+        row.append(InlineKeyboardButton("Not placed" if p in done else "Done", callback_data=f"od:{rid}:{int(p not in done)}:{p}"[:64]))
+        out.append((text, InlineKeyboardMarkup([row])))
+    return out
+
+
+def named_keyboard(names: list[tuple[str, int]]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(f"Compare {n}"[:BUTTON_TEXT], callback_data=f"nl:{line_tag(n)}"),
+                                  InlineKeyboardButton("Make it my list", callback_data=f"nu:{line_tag(n)}")]
+                                 for n, _ in names[:LIST_BUTTONS]])
+
+
+def parse_callback(data: str) -> tuple[str, str, int, str | None] | None:
+    """"pk:<rid>:<item>:<card key>" (pick) or "fg:<rid>:<item>" (choose again)."""
+    parts = (data or "").split(":")
+    try:
+        if parts[0] == "pk" and len(parts) == 4:
+            return "pick", parts[1], int(parts[2]), parts[3]
+        if parts[0] == "fg" and len(parts) in (3, 4):  # "fg:<rid>:<item>:<line tag>"
+            return "forget", parts[1], int(parts[2]), parts[3] if len(parts) == 4 else None
+    except ValueError:
+        pass
+    return None
+
+
+def chunks(text: str, limit: int = TG_LIMIT) -> list[str]:
+    """Split at line breaks so a message never cuts a line (or a link) in half."""
+    out, cur = [], ""
+    for line in text.split("\n"):
+        if cur and len(cur) + 1 + len(line) > limit:
+            out.append(cur)
+            cur = ""
+        while len(line) > limit:  # one very long line: hard cut, after what came before it
+            if cur:
+                out.append(cur)
+                cur = ""
+            out.append(line[:limit])
+            line = line[limit:]
+        cur = f"{cur}\n{line}" if cur else line
+    if cur:
+        out.append(cur)
+    return [p for p in out if p.strip()]
+
+
+def alert_keyboard(alert) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("Stop watching", callback_data=f"uw:{alert.watch_id}")]]
+    if alert.url.startswith("https://"):
+        rows.insert(0, [InlineKeyboardButton("Open the product", url=alert.url)])
+    return InlineKeyboardMarkup(rows)
+
+
+async def safe_edit(query, text: str, markup=None) -> None:
+    """Edit a bot message; a repeated tap that changes nothing is not an error."""
+    from telegram.error import BadRequest
+
+    try:
+        await query.edit_message_text(text, reply_markup=markup)
+    except BadRequest as e:
+        if "not modified" not in str(e).lower():
+            raise
+
+
+async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    log.error("Telegram handler failed", exc_info=ctx.error)
+
+
+async def setup_menu(bot: Application) -> None:
+    """The "/" menu in Telegram. Best effort: the bot works without it."""
+    try:
+        await bot.bot.set_my_commands(COMMANDS)
+    except Exception:
+        log.warning("Could not set the Telegram command menu", exc_info=True)
+
+
+def build_bot(core: App) -> Application:
+    allowed = core.settings.allowed_chat_ids
+    bot = Application.builder().token(core.settings.telegram_token).build()
+
+    def ok(update: Update) -> bool:
+        return update.effective_chat.id in allowed
+
+    async def reply(update: Update, text: str, markup=None, html: bool = False) -> None:
+        parts = chunks(text)
+        for k, part in enumerate(parts):
+            await update.effective_message.reply_text(
+                part, disable_web_page_preview=True, reply_markup=markup if k == len(parts) - 1 else None,
+                parse_mode="HTML" if html else None)
+
+    async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = update.effective_chat.id
+        if not ok(update):
+            await reply(update, f"Your chat ID is {chat_id}. Add it to TELEGRAM_ALLOWED_CHAT_IDS in .env and restart.")
+            return
+        await reply(update, HELP, MENU)
+
+    async def run_compare(update: Update, requests, exact: bool = False) -> None:
+        if not requests:
+            await reply(update, "The list is empty. Type an item, or add lines with /add.")
+            return
+        await update.effective_chat.send_action(ChatAction.TYPING)
+        n = len(requests)
+        waiting = await update.effective_message.reply_text(
+            f"Searching {n} item{'s' if n != 1 else ''} in every shop. This takes up to a minute.")
+        try:
+            result, _, rid = await core.run(requests, exact_only=exact)
+        except Exception as e:
+            log.exception("compare failed")
+            await reply(update, f"The comparison failed ({type(e).__name__}: {e}). Try again; if it repeats, "
+                                "check that shopper serve and Shopping Chrome are running.")
+            return
+        finally:
+            try:
+                await waiting.delete()
+            except Exception:
+                pass
+        core.last_rid[update.effective_chat.id] = rid
+        await reply(update, core.chat_text(rid), result_keyboard(core, result, rid), html=True)
+        if result.best and not any(r.needs_pick for r in result.items) and len(result.best.platforms) > 1:
+            for text, markup in order_messages(core, result, rid):
+                await update.effective_message.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
+        checks = check_keyboard(result, rid)
+        if checks:
+            await update.effective_message.reply_text("Right products? Your answers teach shopper what you mean.",
+                                                      reply_markup=checks)
+        for i, r in enumerate(result.items):
+            if r.needs_pick:
+                await update.effective_message.reply_text(
+                    f"Which one do you mean? {r.request.qty} × {r.request.query}",
+                    reply_markup=pick_keyboard(core, result, rid, i))
+
+    async def show_list(update: Update, edit: bool = False) -> None:
+        items = core.list_items()
+        text = ("\n".join(f"{i + 1}. {it.qty} × {it.query}\n    {entry_of(it).summary()}" for i, it in enumerate(items))
+                or "The list is empty. Add lines with /add, or press Save as my list under a result.")
+        if edit and update.callback_query:
+            await safe_edit(update.callback_query, text[:TG_LIMIT], list_keyboard(items))
+        else:
+            await reply(update, text, list_keyboard(items))
+
+    async def show_watches(update: Update, edit: bool = False) -> None:
+        rows = core.store.list_watches(update.effective_chat.id)
+        lines = [f"#{w.id} {w.query}" + (f" @ {w.target:,.2f}" if w.target is not None else "")
+                 + (f" — now {w.last_price:,.2f} ({label(core.settings, w.last_platform)})" if w.last_price is not None else "")
+                 for w in rows]
+        text = "\n".join(lines) or "No watches. Add one: /watch Nescafe classic 200g @ 250"
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"Stop #{w.id}", callback_data=f"uw:{w.id}")] for w in rows[:LIST_BUTTONS]])
+        if edit and update.callback_query:
+            await safe_edit(update.callback_query, text[:TG_LIMIT], markup)
+        else:
+            await reply(update, text, markup)
+
+    async def push_rid(update: Update, rid: str | None) -> None:
+        if not rid:
+            await reply(update, "Compare something first, then add it to your carts.")
+            return
+        await update.effective_chat.send_action(ChatAction.TYPING)
+        await reply(update, "\n".join(await core.push_once(rid)))
+
+    async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not ok(update):
+            return
+        text = update.effective_message.text.strip()
+        asked = getattr(getattr(update.effective_message, "reply_to_message", None), "text", "") or ""
+        chat = update.effective_chat.id
+        if text in MENU_BUTTONS:
+            wizards.pop(chat, None)  # a menu button ends an unfinished step-by-step add
+        elif not asked and wizard(chat) and await wizard_text(update, wizard(chat), text):
+            return
+        shop = next((n for n, lbl in app_shops().items() if asked == PRICE_PROMPT.format(label=lbl, name=n)), None)
+        if shop:
+            await save_prices(update, shop, text)
+        elif asked == ADD_PROMPT:
+            await add_lines(update, text)
+        elif asked == WATCH_PROMPT:
+            await add_watch(update, text)
+        elif text == ADD_ITEM:
+            await start_wizard(update)
+        elif text == COMPARE_LIST:
+            await run_compare(update, core.list_items())
+        elif text == MY_LIST:
+            await show_list(update)
+        elif text == WATCHES:
+            await show_watches(update)
+        elif text == HOW:
+            await reply(update, HELP, MENU)
+        else:
+            await run_compare(update, await core.parse_async(text))
+
+    async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not ok(update):
+            await query.answer()
+            return
+        data = query.data or ""
+        kind, _, rest = data.partition(":")
+        if kind in ("pk", "fg"):
+            await on_pick(update, query)
+        elif kind == "wz":
+            await on_wizard_button(update, query, rest)
+        elif kind in ("push", "save"):
+            result = core.results.get(rest)
+            if result is None:
+                await query.answer("This comparison is no longer open. Send the list again.", show_alert=True)
+            elif kind == "push":
+                await query.answer("Adding to your carts")
+                try:  # the button goes; push_once also refuses a second push from anywhere
+                    await query.edit_message_reply_markup(result_keyboard(core, result, rest))
+                except Exception:
+                    pass
+                await push_rid(update, rest)
+            else:
+                core.save_list([r.request for r in result.items])
+                await query.answer("Saved as your list")
+                await reply(update, f"Saved {len(result.items)} line(s) as the household list.")
+        elif kind == "rm":
+            index, _, tag = rest.partition(":")
+            items = core.list_items()
+            i = int(index) if index.isdigit() else -1
+            removed = 0 <= i < len(items) and line_tag(items[i].query) == tag and core.remove_from_list(i, items[i].query)
+            await query.answer("Removed" if removed else "The list changed; nothing was removed")
+            await show_list(update, edit=True)
+        elif kind == "lq":
+            index, tag, step = (rest.split(":") + ["", "", ""])[:3]
+            items = core.list_items()
+            i = int(index) if index.isdigit() else -1
+            ok_line = 0 <= i < len(items) and line_tag(items[i].query) == tag and step in ("1", "-1")
+            new = items[i].qty + int(step) if ok_line else 0
+            if ok_line and core.set_list_qty(i, new, items[i].query):
+                await query.answer("Removed" if new < 1 else f"{new} × {items[i].query}")
+            else:
+                await query.answer("The list changed; nothing was changed")
+            await show_list(update, edit=True)
+        elif kind in ("ps", "od"):
+            rid, _, tail = rest.partition(":")
+            result = core.results.get(rid)
+            if result is None:
+                await query.answer("This comparison is no longer open. Send the list again.", show_alert=True)
+                return
+            if kind == "ps":
+                shop = tail
+                await query.answer("Adding to your cart")
+                await reply(update, "\n".join(await core.push_shop(rid, shop)))
+            else:
+                flag, _, shop = tail.partition(":")
+                core.mark_done(rid, shop, flag == "1")
+                await query.answer("Marked as placed" if flag == "1" else "Marked as not placed")
+            mark = f" · {label(core.settings, shop)} — "
+            msg = next(((t, m) for t, m in order_messages(core, result, rid) if mark in t.split("\n")[0]), None)
+            if msg:  # the order's message shows its new state and buttons
+                await safe_edit(query, *msg)
+        elif kind in ("nl", "nu"):
+            name = next((n for n, _ in core.named_lists() if line_tag(n) == rest), None)
+            if name is None:
+                await query.answer("That list is gone.", show_alert=True)
+            elif kind == "nu":
+                core.use_named(name)
+                await query.answer(f"{name} is now the household list")
+                await show_list(update)
+            else:
+                await query.answer()
+                await run_compare(update, core.named(name))
+        elif kind == "cmp":
+            await query.answer()
+            await run_compare(update, core.list_items())
+        elif kind == "clr":
+            core.clear_list()
+            await query.answer("List cleared")
+            await show_list(update, edit=True)
+        elif kind in ("cf", "dn"):
+            await on_check(update, query, kind, rest)
+        elif kind == "ss" and rest in app_shops():
+            shot = screens.pop(update.effective_chat.id, None)
+            if shot is None:
+                await query.answer("Send the screenshot again.", show_alert=True)
+            else:
+                await query.answer("Reading the screenshot")
+                await safe_edit(query, f"Reading the {app_shops()[rest]} screenshot.")
+                await read_screen(update, rest, *shot)
+        elif kind == "ap" and rest in app_shops():
+            await query.answer()
+            await ask_prices(update, rest)
+        elif kind == "uw" and rest.isdigit():
+            done = core.store.delete_watch(update.effective_chat.id, int(rest))
+            await query.answer("Stopped" if done else "That watch is already gone")
+            await show_watches(update, edit=True)
+        else:
+            await query.answer()
+
+    async def on_check(update: Update, query, kind: str, rest: str) -> None:
+        rid, i, platform, key = (rest.split(":") + ["", "", "", ""])[:4]
+        result = core.results.get(rid)
+        if result is None or not i.isdigit():
+            await query.answer("This comparison is no longer open. Send the list again.", show_alert=True)
+            return
+        status = core.feedback(rid, "confirm" if kind == "cf" else "deny", int(i), platform=platform, offer=key)
+        if status != "ok":
+            await query.answer("Already answered.")
+            return
+        r = result.items[int(i)]
+        await query.answer("Thanks: remembered" if kind == "cf" else "Noted: that one will not come back")
+        try:
+            await query.edit_message_reply_markup(check_keyboard(result, rid))
+        except Exception:
+            pass
+        if kind == "dn":
+            m = result.best.assignments.get(int(i)) if result.best else None
+            nxt = f"Next best for {r.request.query}: {m.offer.name} at {label(core.settings, m.offer.platform)}, " \
+                  f"{m.offer.price:,.2f}." if m else f"No other match for {r.request.query}."
+            await reply(update, nxt)
+            if r.needs_pick:
+                await update.effective_message.reply_text(f"Which one do you mean? {r.request.qty} × {r.request.query}",
+                                                          reply_markup=pick_keyboard(core, result, rid, int(i)))
+
+    async def on_pick(update: Update, query) -> None:
+        parsed = parse_callback(query.data)
+        result = core.results.get(parsed[1]) if parsed else None
+        if not parsed or result is None:
+            await query.answer("This comparison is no longer open. Send the list again.", show_alert=True)
+            return
+        action, rid, i, key = parsed
+        r = result.items[i] if 0 <= i < len(result.items) else None
+        chosen = next((c.label for c in r.cards if c.key == key), None) if r else None
+        if action == "forget" and key and not (r and line_tag(r.request.query) == key):
+            await query.answer("The list changed; nothing was changed.", show_alert=True)
+            return
+        if core.feedback(rid, action, i, card=key if action == "pick" else None) != "ok":
+            await query.answer("Already done, or that choice is no longer available.", show_alert=True)
+            return
+        await query.answer("Saved")
+        if action == "pick":
+            again = InlineKeyboardMarkup([[InlineKeyboardButton("Choose again", callback_data=f"fg:{rid}:{i}:{line_tag(r.request.query)}")]])
+            await safe_edit(query, f"Chosen for {r.request.query}: {chosen}. I will use it next time too.", again)
+        else:
+            await safe_edit(query, f"Which one do you mean? {r.request.qty} × {r.request.query}",
+                            pick_keyboard(core, result, rid, i))
+        if not any(x.needs_pick for x in result.items):
+            await reply(update, "<b>Updated plan</b>\n" + core.chat_text(rid), result_keyboard(core, result, rid), html=True)
+
+    wizards: dict[int, dict] = {}  # chat -> step-by-step add in progress
+
+    def wizard(chat: int) -> dict | None:
+        w = wizards.get(chat)
+        if w and time.monotonic() - w["at"] > WIZARD_MINUTES * 60:
+            wizards.pop(chat, None)
+            return None
+        return w
+
+    def advance(w: dict) -> None:
+        """Next step, skipping fields already given (typed "Juhayna skimmed milk 1L" at step 1)."""
+        e, w["at"] = w["entry"], time.monotonic()
+        w["step"] += 1
+        while w["step"] < len(STEPS) and ((STEPS[w["step"]] in ("brand", "type", "size") and getattr(e, STEPS[w["step"]]))
+                                           or (STEPS[w["step"]] == "pieces" and e.pieces > 1)):
+            w["step"] += 1
+
+    async def ask_step(update: Update, w: dict, query=None) -> None:
+        e = w["entry"]
+        if w["step"] >= len(STEPS):
+            text, markup = f"Check this item:\n{e.qty} × {e.phrase()}\n    {e.summary()}", DONE_KEYBOARD
+        else:
+            step = STEPS[w["step"]]
+            text, markup = ASK[step], wizard_keyboard(step, w["options"].get(step, []))
+            if w["step"] > 0:
+                text = f"{e.phrase()}\n\n{text}"
+        if query:
+            await safe_edit(query, text, markup)
+        else:
+            await reply(update, text, markup)
+
+    async def start_wizard(update: Update, query=None) -> None:
+        wizards[update.effective_chat.id] = {"entry": Entry(""), "step": 0, "options": {}, "at": time.monotonic()}
+        await ask_step(update, wizards[update.effective_chat.id], query)
+
+    async def wizard_text(update: Update, w: dict, text: str) -> bool:
+        """Typed answer to the current step. False when there is no open step (the text is a new search)."""
+        if w["step"] >= len(STEPS):
+            wizards.pop(update.effective_chat.id, None)
+            return False
+        step = STEPS[w["step"]]
+        if step == "item" and "\n" in text:  # a pasted list
+            wizards.pop(update.effective_chat.id, None)
+            await add_lines(update, text)
+            return True
+        if not set_field(w["entry"], step, text):
+            await reply(update, "That does not fit this step.\n" + ASK[step], wizard_keyboard(step, w["options"].get(step, [])))
+            return True
+        if step == "item":
+            first = (w["entry"].item.split() or [""])[0]
+            w["options"] = suggest(core.store.recent_names(first), w["entry"].item) if len(first) > 2 else {}
+        advance(w)
+        await ask_step(update, w)
+        return True
+
+    async def on_wizard_button(update: Update, query, rest: str) -> None:
+        chat = update.effective_chat.id
+        if rest == "x":
+            wizards.pop(chat, None)
+            await query.answer("Cancelled")
+            await safe_edit(query, "Cancelled. Tap Add an item to start again.")
+            return
+        if rest == "new":
+            await query.answer()
+            await start_wizard(update, query)
+            return
+        w = wizard(chat)
+        if w is None:
+            await query.answer("This add expired. Tap Add an item to start again.", show_alert=True)
+            return
+        e = w["entry"]
+        if rest in ("add", "cmp") and w["step"] >= len(STEPS):
+            wizards.pop(chat, None)
+            await query.answer()
+            if rest == "add":
+                core.add_to_list([e.request()])
+                await safe_edit(query, f"Added: {e.qty} × {e.phrase()}\n    {e.summary()}\nThe list has "
+                                       f"{len(core.list_items())} line(s).", list_keyboard(core.list_items()))
+            else:
+                await safe_edit(query, f"Comparing {e.qty} × {e.phrase()}")
+                await run_compare(update, [e.request()])
+            return
+        step, _, choice = rest.partition(":")
+        if w["step"] >= len(STEPS) or STEPS[w["step"]] != step:
+            await query.answer("That step is done already.")
+            return
+        options = FIXED.get(step) or w["options"].get(step, [])
+        if choice == "-":
+            setattr(e, step, 1 if step == "pieces" else "")
+        elif choice.isdigit() and int(choice) < len(options):
+            set_field(e, step, options[int(choice)])
+        else:
+            await query.answer("That choice is gone. Type it instead.")
+            return
+        await query.answer()
+        advance(w)
+        await ask_step(update, w, query)
+
+    async def add(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not ok(update):
+            return
+        text = update.effective_message.text.partition(" ")[2].strip()
+        if not text:
+            await start_wizard(update)
+            return
+        await add_lines(update, text)
+
+    async def add_lines(update: Update, text: str) -> None:
+        items = await core.parse_async(text)
+        if not items:
+            await reply(update, "Nothing to add. Send one item per line, like 2 Juhayna full cream milk 1L.")
+            return
+        core.add_to_list(items)
+        read = "\n".join(f"{it.qty} × {it.query}\n    {entry_of(it).summary()}" for it in items)
+        await reply(update, f"Added {len(items)}:\n{read}\nThe list has {len(core.list_items())} line(s).",
+                    list_keyboard(core.list_items()))
+
+    async def show(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if ok(update):
+            await show_list(update)
+
+    async def remove(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not ok(update):
+            return
+        try:
+            n = int(ctx.args[0])
+        except (IndexError, ValueError):
+            await reply(update, "Usage: /remove 3, or press a Remove button under /list.")
+            return
+        await reply(update, "Removed." if core.remove_from_list(n - 1) else "No such line.")
+
+    async def clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if ok(update):
+            core.clear_list()
+            await reply(update, "List cleared.")
+
+    async def compare_saved(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not ok(update):
+            return
+        exact = bool(ctx.args) and ctx.args[0].lower() == "exact"
+        await run_compare(update, core.list_items(), exact)
+
+    async def watch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not ok(update):
+            return
+        text = update.effective_message.text.partition(" ")[2].strip()
+        if not text:
+            await update.effective_message.reply_text(WATCH_PROMPT, reply_markup=ForceReply(input_field_placeholder="Nescafe classic 200g @ 250"))
+            return
+        await add_watch(update, text)
+
+    async def add_watch(update: Update, text: str) -> None:
+        query, target = parse_watch(text)
+        if not query:
+            await reply(update, WATCH_PROMPT)
+            return
+        wid = core.store.add_watch(update.effective_chat.id, query, target)
+        m = await best_exact(core, query)
+        if m:
+            core.store.update_watch(wid, m.offer.price, m.offer.platform, m.offer.url)
+            now = f"Best now: EGP {m.offer.price:,.2f} at {label(core.settings, m.offer.platform)} — {m.offer.name}"
+        else:
+            now = "No exact match right now; I will keep checking."
+        goal = f" Target EGP {target:,.2f}." if target is not None else ""
+        await reply(update, f"Watching #{wid}: {query}.{goal}\n{now}")
+
+    async def watches(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if ok(update):
+            await show_watches(update)
+
+    async def unwatch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not ok(update):
+            return
+        try:
+            wid = int(ctx.args[0].lstrip("#"))
+        except (IndexError, ValueError):
+            await reply(update, "Usage: /unwatch 3, or press a Stop button under /watches.")
+            return
+        await reply(update, "Stopped." if core.store.delete_watch(update.effective_chat.id, wid) else "No such watch.")
+
+    def app_shops() -> dict[str, str]:
+        return {n: p.label for n, p in core.settings.platforms.items() if p.status == "app" and p.enabled}
+
+    async def ask_prices(update: Update, shop: str) -> None:
+        await update.effective_message.reply_text(PRICE_PROMPT.format(label=app_shops()[shop], name=shop),
+                                                  reply_markup=ForceReply(input_field_placeholder="item = price"))
+
+    async def save_prices(update: Update, shop: str, text: str) -> None:
+        from .adapters.appshop import parse_prices
+
+        entries = parse_prices(text)
+        if not entries:
+            await reply(update, "No prices found. Send one per line, like: Juhayna skimmed milk 1L = 54.95")
+            return
+        core.prices.add(shop, entries)
+        lines = "\n".join(f"• {n}: {p:,.2f}" for n, p in entries)
+        await reply(update, f"Saved {len(entries)} {app_shops()[shop]} price(s). They count in comparisons for 30 days.\n{lines}")
+
+    async def price(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not ok(update):
+            return
+        shops = app_shops()
+        if not shops:
+            await reply(update, "No app-only shops are enabled in config/platforms.toml.")
+            return
+        words = update.effective_message.text.split(None, 2)
+        shop = next((n for n in shops if len(words) > 1 and words[1].lower() in (n, shops[n].lower())), None)
+        if shop and len(words) > 2:
+            await save_prices(update, shop, words[2])
+        elif shop:
+            await ask_prices(update, shop)
+        else:
+            await update.effective_message.reply_text("Which app?", reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(lbl, callback_data=f"ap:{n}") for n, lbl in shops.items()]]))
+
+    screens: dict[int, tuple[bytes, str]] = {}  # chat -> screenshot waiting for its shop
+
+    async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """A screenshot of Breadfast or Rabbit: read its prices. The caption names the shop, or buttons ask."""
+        if not ok(update):
+            return
+        msg, shops = update.effective_message, app_shops()
+        if not shops:
+            await reply(update, "No app-only shops are enabled, so there is nothing to read screenshots for.")
+            return
+        if msg.photo:
+            f, kind = await msg.photo[-1].get_file(), "image/jpeg"
+        else:
+            f, kind = await msg.document.get_file(), msg.document.mime_type or "image/jpeg"
+        image = bytes(await f.download_as_bytearray())
+        caption = (msg.caption or "").strip().lower()
+        shop = next((n for n, lbl in shops.items() if caption and (caption.startswith(n) or caption.startswith(lbl.lower()))), None)
+        if shop is None and len(shops) > 1:
+            screens[update.effective_chat.id] = (image, kind)
+            await msg.reply_text("Which app is this screenshot from?", reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(lbl, callback_data=f"ss:{n}") for n, lbl in shops.items()]]))
+            return
+        await read_screen(update, shop or next(iter(shops)), image, kind)
+
+    async def read_screen(update: Update, shop: str, image: bytes, kind: str) -> None:
+        from .adapters.appshop import read_screenshot
+
+        await update.effective_chat.send_action(ChatAction.TYPING)
+        try:
+            entries = await asyncio.to_thread(read_screenshot, image, kind, app_shops()[shop], core.settings.anthropic_key)
+        except Exception as e:
+            log.warning("screenshot: %s", e)
+            await reply(update, f"Could not read the screenshot: {e}")
+            return
+        if not entries:
+            await reply(update, "No products with prices on that screenshot. Send the search results screen.")
+            return
+        core.prices.add(shop, entries)
+        lines = "\n".join(f"• {n}: {p:,.2f}" for n, p in entries)
+        await reply(update, f"Read {len(entries)} {app_shops()[shop]} price(s) from the screenshot. They count in "
+                            f"comparisons for 30 days. Check them; delete a wrong one on the home page.\n{lines}")
+
+    async def lists(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/lists: saved lists; /lists save Weekly keeps the household list as "Weekly"."""
+        if not ok(update):
+            return
+        words = update.effective_message.text.split(None, 2)
+        if len(words) > 2 and words[1].lower() == "save":
+            await reply(update, f"Saved the household list as {words[2]}." if core.save_named(words[2])
+                        else "Nothing to save: the household list is empty.")
+            return
+        names = core.named_lists()
+        if not names:
+            await reply(update, "No saved lists yet. Keep a copy of the household list with: /lists save Weekly")
+            return
+        await reply(update, "\n".join(f"{n} — {k} line{'s' if k != 1 else ''}" for n, k in names), named_keyboard(names))
+
+    async def push(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if ok(update):
+            await push_rid(update, core.last_rid.get(update.effective_chat.id))
+
+    bot.add_handler(CommandHandler(["start", "help"], start))
+    bot.add_handler(CommandHandler("push", push))
+    bot.add_handler(CommandHandler("lists", lists))
+    bot.add_handler(CommandHandler("price", price))
+    bot.add_handler(CommandHandler("watch", watch))
+    bot.add_handler(CommandHandler("watches", watches))
+    bot.add_handler(CommandHandler("unwatch", unwatch))
+    bot.add_handler(CommandHandler("add", add))
+    bot.add_handler(CommandHandler("list", show))
+    bot.add_handler(CommandHandler("remove", remove))
+    bot.add_handler(CommandHandler("clear", clear))
+    bot.add_handler(CommandHandler("compare", compare_saved))
+    bot.add_handler(CallbackQueryHandler(on_button))
+    bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    bot.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, on_photo))
+    bot.add_error_handler(on_error)
+    return bot
+
+
+async def watch_loop(core: App, bot: Application, interval_s: float, first_delay_s: float = 60) -> None:
+    """Re-price every watch on a timer and message the owner when one fires."""
+    await asyncio.sleep(first_delay_s)
+    while True:
+        try:
+            for alert in await check_watches(core):
+                await bot.bot.send_message(alert.chat_id, alert.text, disable_web_page_preview=True,
+                                           reply_markup=alert_keyboard(alert))
+        except Exception:
+            log.exception("watch check failed")
+        await asyncio.sleep(interval_s)

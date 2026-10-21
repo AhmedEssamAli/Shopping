@@ -1,0 +1,212 @@
+{
+    "data": {
+        "products": {
+            "items": [
+                {
+                    "name": "Juhayna - Milk Lactose Skimmed Cream - 1l",
+                    "sku": "374775",
+                    "url_key": "juhayna-milk-lactose-skimmed-cream-1-l",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 109.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 109.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna - Milk Skimmed - 1l",
+                    "sku": "125344",
+                    "url_key": "juhayna-skimmed-milk-1-l-spinneys",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 54.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 54.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna - Milk Semi Skimmed - 1l",
+                    "sku": "125345",
+                    "url_key": "juhayna-semi-skimmed-milk-1-l-spinneys",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 54.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 54.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna - Milk Full Cream - 200ml",
+                    "sku": "125350",
+                    "url_key": "juhayna-full-cream-milk-200-ml",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 12.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 12.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna - Milk Full Cream - 1l",
+                    "sku": "125343",
+                    "url_key": "juhayna-milk-full-cream-1-l",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 49.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 54.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna - Milk 0 Fat - 1l",
+                    "sku": "276527",
+                    "url_key": "juhayna-zero-fat-milk-1-l",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 54.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 54.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna - Milk Skimmed - 1.5l",
+                    "sku": "388570",
+                    "url_key": "product-261",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 78.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 78.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna - Milk Half Cream Save 10LE - 6*1l",
+                    "sku": "434816",
+                    "url_key": "juhayna-milk-half-cream-save-10le-6-1l",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 319.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 319.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna - Milk Skimmed Save 10LE - 6*1l",
+                    "sku": "434817",
+                    "url_key": "juhayna-milk-skimmed-save-10le-6-1l",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 319.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 319.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna - Milk Full Cream - 1.5l",
+                    "sku": "125341",
+                    "url_key": "juhayna-milk-full-cream-1-5-l",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 77.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 77.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna - Milk Skimmed - 200ml",
+                    "sku": "125351",
+                    "url_key": "juhayna-skimmed-milk-200-ml",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 12.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 12.95
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Bounty - 3 Milk Chocolate With Coconut - 3*50g",
+                    "sku": "467959",
+                    "url_key": "bounty-3-milk-chocolate-with-coconut-3-50g-467959",
+                    "stock_status": "IN_STOCK",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 119.95,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 119.95
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}

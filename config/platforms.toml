@@ -1,0 +1,173 @@
+# Per-platform settings. Copy fee numbers from a real checkout in YOUR area,
+# then set verified = true. Until then the optimiser treats fees as 0 and every
+# proposal is flagged "fees unverified".
+#
+# status:
+#   live     - adapter works without a browser (public catalogue API)
+#   browser  - adapter needs the signed-in browser profile on the home PC
+#   pending  - adapter not calibrated yet; run `shopper capture <platform>` on the home PC
+#
+# Which shops exist, and how each could be added: docs/retailers.md
+
+[gourmet]
+label = "Gourmet Egypt"
+status = "live"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[seoudi]
+# Your delivery district in Seoudi's own area list (it decides the branch). Choosing an area on
+# the home page overrides this. North Lotas, Fifth Settlement -> HydePark branch (2026-10-21).
+area = "North Lotas"
+label = "Seoudi Market"
+status = "live"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[spinneys]
+label = "Spinneys Egypt"
+status = "live"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[metro_markets]
+# Metro's own site (it is also on talabat). Its Store Locator lists Fifth Settlement;
+# delivery to your address and the fee are not verified. Set enabled = false to drop it.
+label = "Metro Markets"
+status = "live"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[hyperone]
+# Public catalogue works, but no branch in New Cairo was found. Check the HyperOne app
+# with your address first, then set enabled = true.
+label = "HyperOne"
+status = "live"
+enabled = false
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[amazon_now]
+# Amazon's quick delivery, inside amazon.eg. Read in Shopping Chrome.
+# Fees from your checkout (2026-10-20): service fee 4%, at least EGP 5, at most EGP 10;
+# delivery EGP 25, free on orders of EGP 150 or more. Your checkout showed the service fee
+# as free on that order; if it is always free for you (Prime), set service_fee_pct = 0.
+label = "Amazon Now"
+status = "browser"
+enabled = true
+delivery_fee = 25
+free_delivery_over = 150
+service_fee_pct = 4
+service_fee_min = 5
+service_fee_max = 10
+min_order = 0
+verified = true
+
+[noon_minutes]
+# noon's quick delivery (minutes.noon.com). Read in Shopping Chrome.
+# Fees from your checkout (2026-10-20, subtotal EGP 86.75): delivery EGP 25 and a small order
+# fee of EGP 5. Not known yet: the order size that removes the small order fee (set
+# small_order_below) and whether delivery becomes free above some amount (free_delivery_over).
+# Until then both are charged on every order.
+label = "noon Minutes"
+status = "browser"
+enabled = true
+delivery_fee = 25
+service_fee_pct = 0
+small_order_fee = 5
+min_order = 0
+verified = true
+
+[amazon_eg]
+label = "Amazon.eg"
+status = "browser"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[talabat]
+# Shared settings for every talabat shop below. Find your area with `shopper talabat-shops`;
+# the area is in talabat's URL after you set your address: ...?aid=<area_id>, area slug in the listing URL.
+status = "live"
+enabled = true
+area_id = 8192
+area_slug = "tagammoa-5-sodic"
+max_age_hours = 24          # catalogue snapshot age before it is re-read in the background
+skip_categories = ["tobacco"]
+verified = false            # fees come live from talabat per shop; values here are only a fallback
+# Shops to compare. `shopper talabat-shops` lists all that deliver to you (79 on 2026-10-18).
+# Each one becomes platform "talabat_<branch_id>". Fewer shops = faster daily refresh.
+shops = [
+  {branch_id = 793312, slug = "talabat-mart-tagammoa-5-south-investors", label = "talabat Mart", min_order = 40},
+  {branch_id = 743103, slug = "carrefour-vitali-new-cairo", label = "Carrefour (talabat)", min_order = 150},
+  {branch_id = 678726, slug = "spinneys-tagammoa-5-auc-pirl", label = "Spinneys (talabat)", min_order = 85},
+  {branch_id = 716108, slug = "metro-market-catalyst-m055", label = "Metro (talabat)", min_order = 85},
+  {branch_id = 772757, slug = "lulu-hypermarket-tagammoa-5-hay-1", label = "Lulu (talabat)", min_order = 150},
+  {branch_id = 513473, slug = "zaher-dairy-market-tagammoa-5-hay-2", label = "Zaher Dairy (talabat)", min_order = 75},
+  {branch_id = 743901, slug = "the-grove-market-tagammoa-5-south-investors", label = "The Grove (talabat)", min_order = 50},
+  {branch_id = 768626, slug = "zidan-market-tagammoa-5-hay-2", label = "Zidan Market (talabat)", min_order = 50},
+]
+
+[noon]
+label = "noon"
+status = "browser"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[carrefour]
+label = "Carrefour Egypt"
+status = "pending"
+enabled = false
+
+[instashop]
+# Read from the shop page in your Shopping Chrome (Instashop encrypts its API; shopper does not break it).
+# Shop slug = the part after /client/ in the shop's URL: instashop.com/en-eg/client/<slug>
+status = "browser"
+enabled = true
+verified = false
+# all_shops: also search every shop saved by `shopper instashop-shops --save` (the shops Instashop
+# shows for your address). Each is a page in Shopping Chrome; at most BROWSER_TABS (default 4)
+# open at once, so many shops make a comparison slower.
+all_shops = true
+shops = [
+  {slug = "mahmoud-elfar-mivida", label = "Mahmoud ElFar (Instashop)"},
+]
+
+# App-only shops: no web catalogue, so prices come from what you type in from the app
+# (Telegram: /price breadfast, or the home page). Prices older than 30 days are ignored.
+[breadfast]
+label = "Breadfast"
+status = "app"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false
+
+[rabbit]
+label = "Rabbit"
+status = "app"
+enabled = true
+delivery_fee = 0
+service_fee_pct = 0
+min_order = 0
+verified = false

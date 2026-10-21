@@ -1,0 +1,224 @@
+{
+    "data": {
+        "products": {
+            "items": [
+                {
+                    "name": "Juhayna Skimmed Milk",
+                    "sku": "6223000350089",
+                    "url_key": "juhayna-skimmed-milk",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "1L",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 60,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 60
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Skimmed Milk",
+                    "sku": "6223000350201",
+                    "url_key": "juhayna-skimmed-milk-200ml",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "200 ml",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 15,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 15
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna 0% Fat Milk",
+                    "sku": "6222014310805",
+                    "url_key": "juhayna-0-fat-milk-1l",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "1L",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 60,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 60
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna N&G Coconut Milk",
+                    "sku": "6222014312441",
+                    "url_key": "juhayna-n-g-coconut-milk",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "1L",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 150,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 150
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Full Cream Milk",
+                    "sku": "6223000350010",
+                    "url_key": "juhayna-full-cream-milk-small",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "200 ml",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 15,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 15
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Mix Chocolate Milk",
+                    "sku": "6222014310881",
+                    "url_key": "juhayna-mix-chocolate-milk",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "200 ml",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 15,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 15
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna N&G Almond Milk",
+                    "sku": "6222014312427",
+                    "url_key": "juhayna-n-g-almond-milk",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "1L",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 150,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 150
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Mix Caramel Milk",
+                    "sku": "6223000350454",
+                    "url_key": "juhayna-mix-caramel-milk-200ml",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "200 ml",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 15,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 15
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Mix Vanilla Milk",
+                    "sku": "6223000350461",
+                    "url_key": "juhayna-mix-vanilla-milk-200ml",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "200 ml",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 15,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 15
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Lactose Free Skimmed Milk",
+                    "sku": "6222014311284",
+                    "url_key": "juhayna-lactose-free-skimmed-milk",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "1L",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 110,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 110
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Mix Banana Milk",
+                    "sku": "6222014310928",
+                    "url_key": "juhayna-mix-banana-milk",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "200 ml",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 15,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 15
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "Juhayna Full Cream Milk",
+                    "sku": "6223000350065",
+                    "url_key": "juhayna-full-cream-milk",
+                    "stock_status": "IN_STOCK",
+                    "product_weight": "1L",
+                    "price_range": {
+                        "minimum_price": {
+                            "final_price": {
+                                "value": 60,
+                                "currency": "EGP"
+                            },
+                            "regular_price": {
+                                "value": 60
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}
