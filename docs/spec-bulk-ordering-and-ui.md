@@ -1,6 +1,6 @@
 # Spec: easy bulk ordering and a new page design
 
-Owner: Ahmed (product), Claude (build) · Status: draft for review · Date: 2026-10-20
+Owner: Ahmed (product), Claude (build) · Status: built 2026-10-21 (Phases 1–4; colour: green) · Date: 2026-10-20
 
 ## Problem statement
 

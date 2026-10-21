@@ -16,6 +16,8 @@ CREATE INDEX IF NOT EXISTS offers_sku ON offers(platform, sku);
 CREATE TABLE IF NOT EXISTS results (id TEXT PRIMARY KEY, created_at TEXT, html TEXT);
 CREATE TABLE IF NOT EXISTS lists (chat_id INTEGER, pos INTEGER, query TEXT, qty INTEGER);
 CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS named_lists (name TEXT, pos INTEGER, query TEXT, qty INTEGER);
+CREATE TABLE IF NOT EXISTS events (at TEXT, kind TEXT, rid TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS watches (
   id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, query TEXT, target REAL,
   last_price REAL, last_platform TEXT, last_url TEXT, checked_at TEXT
@@ -131,6 +133,33 @@ class Store:
     def clear_list(self, chat_id: int) -> None:
         self.db.execute("DELETE FROM lists WHERE chat_id=?", (chat_id,))
         self.db.commit()
+
+    # Named lists ("Weekly", "Monthly"): kept beside the household list.
+    def named_lists(self) -> list[tuple[str, int]]:
+        """(name, lines), by name."""
+        return list(self.db.execute("SELECT name, COUNT(*) FROM named_lists GROUP BY name ORDER BY name COLLATE NOCASE"))
+
+    def get_named(self, name: str) -> list[ItemRequest]:
+        rows = self.db.execute("SELECT query, qty FROM named_lists WHERE name=? ORDER BY pos", (name,))
+        return [ItemRequest(q, n) for q, n in rows]
+
+    def save_named(self, name: str, items: list[ItemRequest]) -> None:
+        self.db.execute("DELETE FROM named_lists WHERE name=?", (name,))
+        self.db.executemany("INSERT INTO named_lists VALUES (?,?,?,?)",
+                            [(name, i, it.query, it.qty) for i, it in enumerate(items)])
+        self.db.commit()
+
+    def delete_named(self, name: str) -> None:
+        self.db.execute("DELETE FROM named_lists WHERE name=?", (name,))
+        self.db.commit()
+
+    # A small log for the spec's measures: time to enter a list, quantity changes, orders placed.
+    def log(self, kind: str, rid: str = "", detail: str = "") -> None:
+        self.db.execute("INSERT INTO events VALUES (?,?,?,?)", (now_utc().isoformat(), kind, rid, detail))
+        self.db.commit()
+
+    def events(self, since: str = "") -> list[tuple[str, str, str, str]]:
+        return list(self.db.execute("SELECT at, kind, rid, detail FROM events WHERE at >= ? ORDER BY at", (since,)))
 
     def add_watch(self, chat_id: int, query: str, target: float | None) -> int:
         cur = self.db.execute("INSERT INTO watches (chat_id, query, target) VALUES (?,?,?)", (chat_id, query, target))

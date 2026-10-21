@@ -76,6 +76,7 @@ class App:
         result = await compare(requests, self.settings, self.adapters, max_orders, exact_only, self.memory, self.learner)
         self.store.record_offers(all_offers(result))
         rid = self.store.save_result("")
+        self.store.log("compare", rid, f"{len(requests)}:{len(result.best.platforms) if result.best else 0}")
         self.results[rid] = result
         self._render(rid)
         while len(self.results) > 50:  # memory only; older pages stay viewable, just without the button
@@ -120,6 +121,7 @@ class App:
         elif qty is not None:
             r = result.items[item]
             r.request = ItemRequest(r.request.query, min(qty, 999))
+            self.store.log("qty", rid, r.request.query)
         self._replan(rid)
         return "ok"
 
@@ -164,6 +166,31 @@ class App:
 
     def clear_list(self) -> None:
         self.store.clear_list(HOUSEHOLD)
+
+    def named_lists(self) -> list[tuple[str, int]]:
+        return self.store.named_lists()
+
+    def save_named(self, name: str, items: list[ItemRequest] | None = None) -> bool:
+        """Keep a named copy ("Weekly") of these lines, or of the household list."""
+        name = " ".join(name.split())[:40]
+        items = self.list_items() if items is None else items
+        if not name or not items:
+            return False
+        self.store.save_named(name, items)
+        return True
+
+    def named(self, name: str) -> list[ItemRequest]:
+        return self.store.get_named(name)
+
+    def use_named(self, name: str) -> bool:
+        """Make a saved list the household list."""
+        items = self.named(name)
+        if items:
+            self.save_list(items)
+        return bool(items)
+
+    def delete_named(self, name: str) -> None:
+        self.store.delete_named(name)
 
     def set_list_qty(self, index: int, qty: int, expect: str | None = None) -> bool:
         """Change a list line's quantity; below 1 removes the line."""
@@ -260,6 +287,7 @@ class App:
         except Exception as e:
             self.shop_pushes[(rid, shop)] = [f"{a.label}: cart push failed: {type(e).__name__}: {e}"]
         self.done.setdefault(rid, set()).add(shop)
+        self.store.log("order_done", rid, shop)
         self._render(rid)
         return self.shop_pushes[(rid, shop)]
 
@@ -267,6 +295,7 @@ class App:
         if rid not in self.results:
             return False
         (self.done.setdefault(rid, set()).add if done else self.done.setdefault(rid, set()).discard)(shop)
+        self.store.log("order_done" if done else "order_undone", rid, shop)
         self._render(rid)
         return True
 

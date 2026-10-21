@@ -307,7 +307,11 @@ border-top:1px solid var(--line);font-size:15px}.order li>span:last-child{font-f
 .order.done{border-color:var(--primary);background:var(--soft)}.ok{font-size:13px;font-weight:700;color:var(--primary)}
 .progress{margin:14px 0 0;font-size:15px}
 .itemrow{position:relative}.itemrow .droprow{grid-column:1/-1;justify-self:end;margin-top:-4px}
-a.back{align-self:center;font-size:15px;color:var(--muted)}button.go{width:auto}
+a.back{align-self:center;font-size:15px;color:var(--muted)}
+button.small{min-height:38px;padding:6px 16px;font-size:14px}.rowactions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
+.savelist{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.savelist label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);flex:1 1 200px}
+.savelist input{font:inherit;min-height:44px;padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}button.go{width:auto}
 /* step bar: where you are in add, review, compare, order */
 .steps{display:flex;flex-wrap:wrap;gap:6px 18px;list-style:none;margin:18px 0 0;padding:0;font-size:14px;color:var(--muted)}
 .steps li{display:flex;align-items:center;gap:8px}.steps b{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:999px;

@@ -75,9 +75,11 @@ Typed and pasted lines use the same order: how many, brand, type, item, pieces x
 ## The home page
 
 Open `WEB_BASE_URL/?t=<WEB_TOKEN>`. It shows:
-- Item rows (see above), a box to paste a list, **Compare prices** and **Add to the list**. Options (exact matches only, most orders) fold away.
+- A step bar: **1 Add items · 2 Review · 3 Compare · 4 Order**.
+- Item rows (see above) with − / + quantity, and a box to paste a list. Rows compare at once; a pasted list, or **Compare the list**, first opens **Check your list**: every line as editable fields, with Remove, **Compare N items** and **Save as my list**. The item field suggests lines you used before.
 - **Products you chose before** as chips: tap one to put that line in the box.
-- **The household list**, with Remove, **Compare the list** and **Clear the list**.
+- **The household list**, with − / + per line, Remove, **Compare the list**, **Clear the list**, and **Keep a copy as** a named list.
+- **Saved lists** ("Weekly", "Monthly"): **Review and compare**, **Make it my list**, Delete. Recent comparisons have **Buy again**.
 - **Recent comparisons**, each with its item count and best total. A page from before the last restart opens as history, without buttons.
 - **Your delivery area**: Seoudi's own list of districts in New Cairo, each with the branch that serves it. Choose yours once; Seoudi prices and stock then come from that branch. A district Seoudi lists without a branch (for example South El-Lotus, 2026-10-20) uses its default store, and the result page says so.
 - **Prices from the apps**: typed lines or a screenshot upload for Breadfast and Rabbit.
@@ -97,12 +99,18 @@ In the app you paste a list, see the comparison, and press **Add the best plan t
 
 ## The comparison page
 
-The page reads like a shop shelf. Each item shows one shelf label per shop, cheapest first; the cheapest exact match sits on the yellow label. Close matches have a dashed label. The best plan is at the top, with one block per order and the total on a yellow tag. **If you buy everything in one shop** shows what the whole basket costs at each shop on its own; shops that miss items get a striped bar. It follows your phone's dark mode.
+- **1 shop / Up to 2 shops / Up to 3 shops** above the plan, each with its best total. Tap one to re-plan.
+- The best plan is a set of numbered **order cards**, largest first: each shop's lines, subtotal, fees and one action, **Add N items to cart** (noon, Amazon) or **Copy list and open the shop**, then **Done: order placed**. The plan shows "1 of 2 orders placed".
+- Each line has − / + and **Remove line** (with Undo). A change re-plans from the prices already fetched, in milliseconds, without searching the shops again. **Refresh prices** appears after 30 minutes.
+- `shopper stats` reads the measures from your own use: time to check a list, quantity changes, split plans fully ordered.
+
+Below the plan, each item shows one shelf label per shop, cheapest first; the cheapest exact match has a green border. Close matches have a dashed label. **If you buy everything in one shop** shows what the whole basket costs at each shop on its own; shops that miss items get a striped bar. It follows your phone's dark mode.
 
 ## Use
 
 Telegram:
 - Send one line to compare that item now: `2 Juhayna full cream milk 1L`. Send several lines to compare a basket.
+- After a split plan, the bot sends one message per order with **Add to cart**, **Open the shop** and **Done**. `/lists` shows saved lists; `/lists save Weekly` keeps a copy of the household list; `/list` has − / + per line.
 - The keyboard under the text box has **Compare my list**, **My list**, **Add an item**, **My watches** and **How to use**. The "/" button lists every command.
 - Under each result: **Add the plan to my carts** (shown once the plan is final; it works once per result), **Save as my list**, and **Open the full table** (when `WEB_BASE_URL` is your https Tailscale address).
 - **The household list** is shared by everyone in `TELEGRAM_ALLOWED_CHAT_IDS` and by the web page. `/add <lines>` adds; under `/list`, **Remove**, **Compare the list** and **Clear the list** are buttons.
@@ -181,7 +189,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · pwa.py (phone app) · cli.py · store.py (SQLite price history)
-tests/             155 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             165 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

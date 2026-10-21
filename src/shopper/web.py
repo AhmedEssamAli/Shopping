@@ -47,7 +47,7 @@ def item_row(e=None) -> str:
     units = "".join(f"<option{' selected' if u == unit else ''}>{u}</option>" for u in UNITS)
     pieces = e.pieces if e is not None and e.pieces > 1 else ""
     return ("<div class=itemrow>"
-            f"<label><span>Item <b>*</b></span><input name=item placeholder='milk' autocomplete=off{v(e and e.item)}></label>"
+            f"<label><span>Item <b>*</b></span><input name=item list=past placeholder='milk' autocomplete=off{v(e and e.item)}></label>"
             f"<label>Brand<input name=brand list=brands placeholder='any brand' autocomplete=off{v(e and e.brand)}></label>"
             f"<label>Type<input name=kind list=types placeholder='any type' autocomplete=off{v(e and e.type)}></label>"
             f"<label>Size of one<span class=sizebox><input name=amount inputmode=decimal placeholder='1'{v(amount)}>"
@@ -217,7 +217,7 @@ def create_app(core: App) -> FastAPI:
                 f"<h2 style='margin:0 0 6px'>What do you want to buy?</h2>"
                 f"<p class='muted small' style='margin:0 0 10px'>One item per row. Only the item is required. Every field "
                 f"you fill must match; every field you leave empty is open.</p>"
-                f"<div id=rows>{item_row() * 2}</div>{ROW_LISTS}<button type=button class=quiet id=addrow>Add another item</button>{guide}"
+                f"<div id=rows>{item_row() * 2}</div>{ROW_LISTS}{past_list()}<button type=button class=quiet id=addrow>Add another item</button>{guide}"
                 f"<details class=choose{' open' if chosen else ''}><summary>Or paste a list</summary>"
                 f"<p class='muted small' style='margin:8px 0'>One item per line, quantity first or last: "
                 f"<code>2 Juhayna full cream milk 1L</code> or <code>rice 5kg x1</code>. Arabic works too.</p>"
@@ -238,14 +238,28 @@ def create_app(core: App) -> FastAPI:
             saved = (f"<h2>The household list</h2><div class=panel><ul class=list>{rows}</ul><div class=actions>"
                      f"<form method=post action='/list/compare{q(t)}' class=inline><button>Compare the list</button></form>"
                      f"<form method=post action='/list/clear{q(t)}' class=inline><button class=quiet>Clear the list</button></form>"
-                     f"</div></div>")
+                     f"</div><form method=post action='/lists/save{q(t)}' class=savelist><label>Keep a copy as"
+                     f"<input name=name list=listnames placeholder='Weekly' required maxlength=40></label>"
+                     f"<button class=quiet>Save list</button></form></div>")
         else:
             saved = ("<h2>The household list</h2><div class=panel><p class='muted small' style='margin:0'>Empty. Add lines "
                      "above, send /add in Telegram, or press Save as my list under a result.</p></div>")
+        named = core.named_lists()
+        names = "<datalist id=listnames>" + "".join(f"<option value='{escape(nm)}'>" for nm, _ in named) + "</datalist>"
+        saved += names + (("<h2 id=lists>Saved lists</h2><div class=panel><ul class=list>" + "".join(
+            f"<li><span><b>{escape(nm)}</b> <span class='muted small'>{k} line{'s' if k != 1 else ''}</span></span>"
+            f"<span class=rowactions>"
+            + "".join(f"<form method=post action='/lists/{act}{q(t)}' class=inline><input type=hidden name=name value='{escape(nm)}'>"
+                      f"<button class={cls}>{txt}</button></form>"
+                      for act, txt, cls in (("review", "Review and compare", "small"), ("use", "Make it my list", "quiet small"),
+                                            ("delete", "Delete", "link")))
+            + "</span></li>" for nm, k in named) + "</ul></div>") if named else "")
         recent = core.store.recent_results()
         past = ("<h2>Recent comparisons</h2><div class=panel><ul class=list>" + "".join(
             f"<li><a href='/r/{escape(rid)}{q(t)}'>{escape(summary or 'Comparison')}</a>"
-            f"<span class='muted small'>{_local(when)}</span></li>" for rid, when, summary in recent)
+            f"<span class=rowactions><span class='muted small'>{_local(when)}</span>"
+            + (f"<form method=post action='/r/{escape(rid)}/reorder{q(t)}' class=inline><button class='quiet small'>Buy again</button></form>"
+               if rid in core.results else "") + "</span></li>" for rid, when, summary in recent)
                 + "</ul></div>") if recent else ""
         return pwa.add_head(page("Compare a basket", form + saved + past + await areas_html(t) + app_prices_html(t) + shops_html() + FORM_SCRIPT, header), t)
 
@@ -294,14 +308,21 @@ def create_app(core: App) -> FastAPI:
             raise HTTPException(status_code=400, detail="Choose an area from the list.")
         return RedirectResponse(f"/{q(t)}#area", status_code=303)
 
+    def past_list() -> str:
+        """Lines you chose a product for, and list lines, as suggestions for the item field."""
+        seen = dict.fromkeys([line for line, _ in core.memory.chosen_lines(30)] + [i.query for i in core.list_items()]
+                             + [n.query for name, _ in core.named_lists() for n in core.named(name)])
+        return "<datalist id=past>" + "".join(f"<option value='{escape(x)}'>" for x in list(seen)[:60]) + "</datalist>"
+
     def review_page(requests, t: str | None, max_orders: int, exact: bool) -> HTMLResponse:
         """Step 2: every line as editable fields, before any shop is searched."""
         n = len(requests)
+        core.store.log("review", "", str(n))
         header = (f"<span class=eyebrow>Nothing searched yet</span><h1>Check your list</h1>"
                   f"<p>shopper read {n} line{'s' if n != 1 else ''} like this. Fix anything that is wrong, "
                   f"change quantities, or remove lines. Then compare.</p>{steps_html(2)}")
         form = (f"<form method=post action='/compare{q(t)}' class='panel plan'>"
-                f"<div id=rows>{''.join(item_row(entry_of(r)) for r in requests)}</div>{ROW_LISTS}"
+                f"<div id=rows>{''.join(item_row(entry_of(r)) for r in requests)}</div>{ROW_LISTS}{past_list()}"
                 f"<button type=button class=quiet id=addrow>Add another item</button>"
                 f"<input type=hidden name=max_orders value={int(max_orders)}>"
                 + ("<input type=hidden name=exact value=1>" if exact else "")
@@ -409,6 +430,35 @@ def create_app(core: App) -> FastAPI:
             return int(qty.strip() or 0) + int(delta or 0)
         except ValueError:
             raise HTTPException(status_code=400, detail="The quantity must be a whole number.") from None
+
+    @api.post("/lists/{action}")
+    async def named_lists(action: str, name: str = Form(""), t: str | None = Query(None)):
+        check(t)
+        if action == "save":
+            if not core.save_named(name):
+                raise HTTPException(status_code=400, detail="Give the list a name, and add lines to the household list first.")
+        elif action == "review":
+            items = core.named(name)
+            if not items:
+                raise HTTPException(status_code=404)
+            return review_page(items, t, core.settings.max_orders, False)
+        elif action == "use":
+            core.use_named(name)
+        elif action == "delete":
+            core.delete_named(name)
+        else:
+            raise HTTPException(status_code=404)
+        return RedirectResponse(f"/{q(t)}#lists", status_code=303)
+
+    @api.post("/r/{rid}/reorder")
+    async def reorder(rid: str, t: str | None = Query(None)):
+        """Buy again: that comparison's lines, with their quantities, in the review step."""
+        check(t)
+        result = core.results.get(rid)
+        if result is None:
+            gone("gone")
+        return review_page([r.request for r in result.items], t, result.max_orders or core.settings.max_orders,
+                           result.exact_only)
 
     @api.post("/r/{rid}/push-shop")
     async def push_shop(rid: str, shop: str = Form(...), t: str | None = Query(None)):

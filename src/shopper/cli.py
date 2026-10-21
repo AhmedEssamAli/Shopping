@@ -11,6 +11,7 @@
   shopper talabat-shops                 list every talabat grocery shop that delivers to you
   shopper refresh talabat               re-read all talabat shop catalogues now (or one: talabat_<id>)
   shopper serve                         run Telegram bot + web page (home PC)
+  shopper stats [--days 30]             the bulk-ordering measures from your own use
 """
 from __future__ import annotations
 
@@ -45,6 +46,20 @@ async def _cmd_login(args) -> None:
             sys.exit(f"Unknown platform: {n}")
         await login(app.settings, a.label, a.login_url)
     await app.close()
+
+
+def _cmd_stats(args) -> None:
+    from .stats import measures
+    from .store import Store
+    m = measures(Store(load_settings().db_path).events(), args.days)
+    secs = m["review_to_compare_s"]
+    print(f"Last {m['days']} days: {m['comparisons']} comparisons")
+    print(f"  Checking a list (review to Compare): {'%d min %02d s' % divmod(secs, 60) if secs is not None else 'no data'}"
+          "   target under 2 min")
+    print(f"  Quantity changes without a new search: {m['qty_changes']}"
+          + (f" ({m['qty_changes_per_comparison']} per comparison)" if m["comparisons"] else ""))
+    print(f"  Split plans with every order ticked Done: {m['split_plans_all_done']} of {m['split_plans']}"
+          + (f" ({m['all_done_pct']}%)" if m["all_done_pct"] is not None else "") + "   target 80%")
 
 
 async def _cmd_capture(args) -> None:
@@ -265,6 +280,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("platforms").set_defaults(fn=_cmd_platforms, sync=True)
     p = sub.add_parser("login"); p.add_argument("platform"); p.set_defaults(fn=_cmd_login)
     p = sub.add_parser("capture"); p.add_argument("platform"); p.set_defaults(fn=_cmd_capture)
+    p = sub.add_parser("stats"); p.add_argument("--days", type=int, default=30); p.set_defaults(fn=_cmd_stats, sync=True)
     for name, fn in (("search", _cmd_search), ("basket", _cmd_basket)):
         p = sub.add_parser(name)
         if name == "search":

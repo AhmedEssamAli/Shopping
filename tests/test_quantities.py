@@ -129,3 +129,69 @@ async def test_order_cards_copy_tick_and_progress(tmp_path):
     assert "Mark as not placed" not in client.get(f"/r/{rid}?t=k").text
     app.results.clear()
     assert client.post(f"/r/{rid}/done?t=k", data={"shop": shop}).status_code == 410
+
+
+def test_saved_lists_and_buy_again(tmp_path):
+    app = core(tmp_path)
+    app.add_to_list(LIST)
+    client = TestClient(create_app(app))
+    client.post("/lists/save?t=k", data={"name": " Weekly "})
+    assert app.named_lists() == [("Weekly", 3)]
+    home = client.get("/?t=k").text
+    assert "Saved lists" in home and "Review and compare" in home and "Make it my list" in home
+    review = client.post("/lists/review?t=k", data={"name": "Weekly"}).text
+    assert "Check your list" in review and review.count("class=itemrow") == 3
+    app.clear_list()
+    client.post("/lists/use?t=k", data={"name": "Weekly"})
+    assert [i.qty for i in app.list_items()] == [2, 1, 1]
+    assert client.post("/lists/save?t=k", data={"name": ""}).status_code == 400
+    done = client.post("/compare?t=k", data=rows(app.list_items()), follow_redirects=True)
+    rid = done.url.path.split("/")[-1]
+    assert "Buy again" in client.get("/?t=k").text
+    again = client.post(f"/r/{rid}/reorder?t=k").text
+    assert "Check your list" in again and "value='2'" in again
+    client.post("/lists/delete?t=k", data={"name": "Weekly"})
+    assert app.named_lists() == []
+    kinds = [k for _, k, _, _ in app.store.events()]
+    assert "review" in kinds and "compare" in kinds
+
+
+async def test_telegram_order_messages_and_lists(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from telegram.ext import CallbackQueryHandler, CommandHandler
+    from shopper.bot import build_bot, order_messages
+    app = core(tmp_path)
+    result, _, rid = await app.run(LIST, max_orders=2)
+    msgs = order_messages(app, result, rid)
+    assert msgs and msgs[0][0].startswith(f"Order 1 of {len(result.best.platforms)} · ")
+    shop = sorted(result.best.platforms, key=lambda p: -result.best.subtotals[p])[0]
+    done = next(b for b in msgs[0][1].inline_keyboard[0] if b.text == "Done")
+    app.settings.telegram_token, app.settings.allowed_chat_ids = "123456:TEST", {42}
+    hs = build_bot(app).handlers[0]
+    button = next(h for h in hs if isinstance(h, CallbackQueryHandler))
+    query = SimpleNamespace(data=done.callback_data, answer=AsyncMock(), edit_message_text=AsyncMock())
+    chat = SimpleNamespace(id=42, send_action=AsyncMock())
+    await button.callback(SimpleNamespace(callback_query=query, effective_chat=chat,
+                                          effective_message=SimpleNamespace(reply_text=AsyncMock())), None)
+    assert shop in app.done[rid] and "✓ placed" in query.edit_message_text.call_args.args[0]
+    app.add_to_list(LIST)
+    app.save_named("Weekly")
+    lists = next(h for h in hs if isinstance(h, CommandHandler) and "lists" in h.commands)
+    sent = AsyncMock()
+    await lists.callback(SimpleNamespace(effective_chat=chat, effective_message=SimpleNamespace(text="/lists", reply_text=sent)), None)
+    assert "Weekly — 3 lines" in sent.call_args.args[0]
+
+
+def test_measures_from_the_event_log():
+    from datetime import timedelta
+    from shopper.models import now_utc
+    from shopper.stats import measures
+    t0 = now_utc()
+    at = lambda s: (t0 + timedelta(seconds=s)).isoformat()  # noqa: E731
+    ev = [(at(0), "review", "", "20"), (at(95), "compare", "r1", "20:2"), (at(120), "qty", "r1", "milk"),
+          (at(200), "order_done", "r1", "metro"), (at(260), "order_done", "r1", "gourmet"),
+          (at(300), "compare", "r2", "3:2"), (at(310), "order_done", "r2", "metro")]
+    m = measures(ev)
+    assert m["comparisons"] == 2 and m["review_to_compare_s"] == 95 and m["qty_changes"] == 1
+    assert (m["split_plans"], m["split_plans_all_done"], m["all_done_pct"]) == (2, 1, 50)

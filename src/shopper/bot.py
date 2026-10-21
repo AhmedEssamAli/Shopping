@@ -7,6 +7,7 @@ Send a message:
   /add (no text)     -> add one item step by step: item, brand, type, size, pieces, how many
   /list              -> the list, with buttons to remove lines, compare or clear
   /compare [exact]   -> compare the list
+  /lists             -> saved lists; /lists save Weekly keeps a copy of the list
   /watch <item> [@ price]  -> alert me when it drops (or reaches the price)
   /watches           -> your watches, with buttons to stop them
   /push              -> add the last best plan to your carts (noon, Amazon)
@@ -74,6 +75,7 @@ COMMANDS = [
     BotCommand("list", "Show the household list"),
     BotCommand("compare", "Compare the household list"),
     BotCommand("add", "Add lines to the list"),
+    BotCommand("lists", "Saved lists (Weekly, Monthly)"),
     BotCommand("push", "Add the last best plan to your carts"),
     BotCommand("price", "Type prices from Breadfast or Rabbit"),
     BotCommand("watch", "Watch an item's price"),
@@ -187,6 +189,39 @@ def set_field(e: Entry, step: str, value: str) -> bool:
     return True
 
 
+def order_messages(core: App, result: CompareResult, rid: str) -> list[tuple[str, InlineKeyboardMarkup]]:
+    """One message per order of the best plan, largest first: its lines as a copyable list, and buttons."""
+    from .report import shop_link
+    best = result.best
+    if not best or len(best.platforms) < 1:
+        return []
+    done = core.done.get(rid, set())
+    order = sorted(best.platforms, key=lambda p: -best.subtotals[p])
+    out = []
+    for k, p in enumerate(order, 1):
+        ms = [m for _, m in sorted(best.assignments.items()) if m.offer.platform == p]
+        a = core.adapters.get(p)
+        name = label(core.settings, p)
+        lines = "\n".join(f"{m.request.qty} × {m.offer.name}  {m.line_total:,.2f}" for m in ms)
+        text = (f"Order {k} of {len(order)} · {name} — EGP {best.subtotals[p] + best.fees[p]:,.2f}"
+                f"{'  ✓ placed' if p in done else ''}\n{lines}\nFees {best.fees[p]:,.2f}")
+        row = []
+        if a and a.supports_cart_push and (rid, p) not in core.shop_pushes and rid not in core.push_log:
+            row.append(InlineKeyboardButton("Add to cart", callback_data=f"ps:{rid}:{p}"[:64]))
+        link = shop_link(p, [(m.offer, m.request.qty) for m in ms], core.adapters)
+        if link.startswith("https://"):
+            row.append(InlineKeyboardButton(f"Open {name}"[:BUTTON_TEXT], url=link))
+        row.append(InlineKeyboardButton("Not placed" if p in done else "Done", callback_data=f"od:{rid}:{int(p not in done)}:{p}"[:64]))
+        out.append((text, InlineKeyboardMarkup([row])))
+    return out
+
+
+def named_keyboard(names: list[tuple[str, int]]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(f"Compare {n}"[:BUTTON_TEXT], callback_data=f"nl:{line_tag(n)}"),
+                                  InlineKeyboardButton("Make it my list", callback_data=f"nu:{line_tag(n)}")]
+                                 for n, _ in names[:LIST_BUTTONS]])
+
+
 def parse_callback(data: str) -> tuple[str, str, int, str | None] | None:
     """"pk:<rid>:<item>:<card key>" (pick) or "fg:<rid>:<item>" (choose again)."""
     parts = (data or "").split(":")
@@ -292,6 +327,9 @@ def build_bot(core: App) -> Application:
                 pass
         core.last_rid[update.effective_chat.id] = rid
         await reply(update, core.chat_text(rid), result_keyboard(core, result, rid), html=True)
+        if result.best and not any(r.needs_pick for r in result.items) and len(result.best.platforms) > 1:
+            for text, markup in order_messages(core, result, rid):
+                await update.effective_message.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
         checks = check_keyboard(result, rid)
         if checks:
             await update.effective_message.reply_text("Right products? Your answers teach shopper what you mean.",
@@ -404,6 +442,35 @@ def build_bot(core: App) -> Application:
             else:
                 await query.answer("The list changed; nothing was changed")
             await show_list(update, edit=True)
+        elif kind in ("ps", "od"):
+            rid, _, tail = rest.partition(":")
+            result = core.results.get(rid)
+            if result is None:
+                await query.answer("This comparison is no longer open. Send the list again.", show_alert=True)
+                return
+            if kind == "ps":
+                shop = tail
+                await query.answer("Adding to your cart")
+                await reply(update, "\n".join(await core.push_shop(rid, shop)))
+            else:
+                flag, _, shop = tail.partition(":")
+                core.mark_done(rid, shop, flag == "1")
+                await query.answer("Marked as placed" if flag == "1" else "Marked as not placed")
+            mark = f" · {label(core.settings, shop)} — "
+            msg = next(((t, m) for t, m in order_messages(core, result, rid) if mark in t.split("\n")[0]), None)
+            if msg:  # the order's message shows its new state and buttons
+                await safe_edit(query, *msg)
+        elif kind in ("nl", "nu"):
+            name = next((n for n, _ in core.named_lists() if line_tag(n) == rest), None)
+            if name is None:
+                await query.answer("That list is gone.", show_alert=True)
+            elif kind == "nu":
+                core.use_named(name)
+                await query.answer(f"{name} is now the household list")
+                await show_list(update)
+            else:
+                await query.answer()
+                await run_compare(update, core.named(name))
         elif kind == "cmp":
             await query.answer()
             await run_compare(update, core.list_items())
@@ -735,12 +802,28 @@ def build_bot(core: App) -> Application:
         await reply(update, f"Read {len(entries)} {app_shops()[shop]} price(s) from the screenshot. They count in "
                             f"comparisons for 30 days. Check them; delete a wrong one on the home page.\n{lines}")
 
+    async def lists(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """/lists: saved lists; /lists save Weekly keeps the household list as "Weekly"."""
+        if not ok(update):
+            return
+        words = update.effective_message.text.split(None, 2)
+        if len(words) > 2 and words[1].lower() == "save":
+            await reply(update, f"Saved the household list as {words[2]}." if core.save_named(words[2])
+                        else "Nothing to save: the household list is empty.")
+            return
+        names = core.named_lists()
+        if not names:
+            await reply(update, "No saved lists yet. Keep a copy of the household list with: /lists save Weekly")
+            return
+        await reply(update, "\n".join(f"{n} — {k} line{'s' if k != 1 else ''}" for n, k in names), named_keyboard(names))
+
     async def push(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if ok(update):
             await push_rid(update, core.last_rid.get(update.effective_chat.id))
 
     bot.add_handler(CommandHandler(["start", "help"], start))
     bot.add_handler(CommandHandler("push", push))
+    bot.add_handler(CommandHandler("lists", lists))
     bot.add_handler(CommandHandler("price", price))
     bot.add_handler(CommandHandler("watch", watch))
     bot.add_handler(CommandHandler("watches", watches))
