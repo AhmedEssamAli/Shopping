@@ -52,6 +52,7 @@ class App:
         self.shop_pushes: dict[tuple[str, str], list[str]] = {}  # (result id, shop) -> what one order card's push did
         self.done: dict[str, set[str]] = {}  # result id -> shops whose order you ticked as placed
         self.pushed_lines: dict[tuple[str, str], tuple] = {}  # what each card push put in the cart
+        self.in_cart: dict[tuple[str, str], tuple] = {}  # lines an earlier push left in the cart before a re-plan
         for name, a in self.adapters.items():  # the delivery area you chose on the home page
             saved = self.store.pref(f"area:{name}")
             if saved and hasattr(a, "use_area"):
@@ -144,14 +145,19 @@ class App:
         result = self.results.get(rid)
         if result is None:
             return "gone"
-        if not 0 <= item < len(result.items) or (expect is not None and result.items[item].request.query != expect):
+        if not 0 <= item < len(result.items):
+            return "stale"
+        expect = expect if expect is not None else result.items[item].request.query
+        if result.items[item].request.query != expect:
             return "stale"
         line, errors = await search_line(request, self.settings, self.adapters, result.platforms, self.memory)
-        if result.items[item].request.query != (expect or result.items[item].request.query):
-            return "stale"  # the line changed while the shops were searched
+        # Lines can be removed or changed while the shops are searched: check again.
+        if not 0 <= item < len(result.items) or result.items[item].request.query != expect:
+            return "stale"
         result.items[item] = line
-        for p, e in errors.items():
-            result.errors.setdefault(p, e)
+        for p in line.candidates:  # a shop that answered now has no standing problem
+            result.errors.pop(p, None)
+        result.errors.update(errors)
         self.store.record_offers([o for offers in line.candidates.values() for o in offers])
         self.store.log("research", rid, request.query)
         self._replan(rid)
@@ -190,22 +196,22 @@ class App:
         self._replan(rid)
         return True
 
-    def _replan(self, rid: str) -> None:
+    def _replan(self, rid: str, memory: bool = False) -> None:
         """Plan again from the fetched offers. A shop's cart push and Done tick stay only while
         that shop's lines are unchanged; a whole-plan push stays only while the plan is unchanged."""
         result = self.results[rid]
         before = _plan_key(result)
-        assemble(result, self.settings, self.adapters, learner=self.learner)
+        assemble(result, self.settings, self.adapters, self.memory if memory else None, learner=self.learner)
         after = _plan_key(result)
         if after != before:
             self.push_log.pop(rid, None)
         for shop in list(self.done.get(rid, ())):
             if before.get(shop) != after.get(shop):
                 self.done[rid].discard(shop)
-        for key in [k for k in self.shop_pushes if k[0] == rid]:
-            if self.pushed_lines.get(key) != after.get(key[1]):
+        for key in [k for k in self.shop_pushes if k[0] == rid and k in self.pushed_lines]:  # not one still running
+            if self.pushed_lines[key] != after.get(key[1]):
+                self.in_cart[key] = self.pushed_lines.pop(key)  # still in the cart: a new push adds only the rest
                 self.shop_pushes.pop(key, None)
-                self.pushed_lines.pop(key, None)
         self.store.log("plan", rid, str(len(result.best.platforms) if result.best else 0))
         self._render(rid)
 
@@ -306,8 +312,7 @@ class App:
             self.memory.forget(r.request)
         else:
             return "stale"
-        assemble(result, self.settings, self.adapters, self.memory, self.learner)
-        self._render(rid)
+        self._replan(rid, memory=True)
         return "ok"
 
     async def push_once(self, rid: str) -> list[str]:
@@ -345,11 +350,18 @@ class App:
                     + "; ".join(r.request.query for r in result.items if r.needs_pick) + "."]
         self.shop_pushes[(rid, shop)] = ["Adding to your cart now…"]  # claimed before the first await
         lines = [(m.offer, m.request.qty) for m in best.assignments.values() if m.offer.platform == shop]
+        had = {(o_url, name): q for _, o_url, name, q in self.in_cart.get((rid, shop), ())}
+        todo = [(o, q - had.get((o.url, o.name), 0)) for o, q in lines if q > had.get((o.url, o.name), 0)]
+        fewer = [f"{name}: {q} in the cart, the plan now wants {next((n for o, n in lines if (o.url, o.name) == (u, name)), 0)}"
+                 for (u, name), q in had.items() if q > next((n for o, n in lines if (o.url, o.name) == (u, name)), 0)]
         try:
-            self.shop_pushes[(rid, shop)] = [f"{a.label}: {x}" for x in await a.add_to_cart(lines)]
+            done_lines = [f"{a.label}: {x}" for x in await a.add_to_cart(todo)] if todo else []
+            self.shop_pushes[(rid, shop)] = done_lines + [f"{a.label}: lower this in the cart yourself: {x}" for x in fewer] \
+                or [f"{a.label}: the cart already has these items"]
             self.pushed_lines[(rid, shop)] = _lines_key(lines)
+            self.in_cart.pop((rid, shop), None)
         except BaseException as e:  # a failed or cancelled push can be tried again
-            del self.shop_pushes[(rid, shop)]
+            self.shop_pushes.pop((rid, shop), None)
             if not isinstance(e, Exception):
                 raise
             return [f"{a.label}: cart push failed: {type(e).__name__}: {e}. Try again."]

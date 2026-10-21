@@ -381,6 +381,8 @@ def create_app(core: App) -> FastAPI:
         if result is None:  # from history: its buttons would act on a comparison that is gone
             html = re.sub(r"<form method=post action='/r/[^']*'.*?</form>", "", html, flags=re.S)
             html = html.replace("<div class=notice></div>", "")  # the Undo notice lived inside its form
+            html = re.sub(r"<details class='panel filters'.*?</details>", "", html, flags=re.S)
+            html = html.replace("<span class=edit>Adjust search</span>", "")
             note = (f"<p class=notice><b>From history.</b> Prices are from then, and choices need a fresh comparison. "
                     f"<a href='/{q(t)}'>Compare again</a></p>")
             html = html.replace("<main>", "<main>" + note, 1)
@@ -461,7 +463,8 @@ def create_app(core: App) -> FastAPI:
         if reset:
             ok = core.set_filter(rid, set(), set(), False)
         elif only:
-            ok = core.set_filter(rid, {only})
+            r = core.results.get(rid)
+            ok = core.set_filter(rid, {only}) if r and only in r.platforms else bool(r)
         else:
             ok = core.set_filter(rid, set(shop), set(brand), bool(exact))
         if not ok:

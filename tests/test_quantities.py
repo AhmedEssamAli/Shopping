@@ -220,7 +220,7 @@ async def test_card_push_failure_can_retry_and_replan_resets_pushes(tmp_path):
     assert app.mark_done(rid, shop) and not app.mark_done(rid, "not-in-plan")
     app.edit_line(rid, 0, "Juhayna skimmed milk 1L", qty=6)  # the cart now holds the old quantity
     assert (rid, shop) not in app.shop_pushes and shop not in app.done[rid]
-    assert "added: 6 ×" in (await app.push_shop(rid, shop))[0]
+    assert "added: 4 ×" in (await app.push_shop(rid, shop))[0]  # 2 are already in the cart: only 4 more go in
 
 
 async def test_change_button_is_keyed_by_line(tmp_path):
@@ -274,3 +274,39 @@ async def test_filters_one_shop_table_and_research(tmp_path):
     assert line.request.query == "eggs 30 pcs" and line.matches.get("metro")
     assert all(a.calls == calls[n] + 1 for n, a in app.adapters.items())  # only this line was searched again
     assert client.post(f"/r/{rid2}/research?t=k", data={"index": 0, "line": "old text", "item": "x"}).status_code == 200
+
+
+def test_brand_filter_skips_lines_without_that_brand():
+    from shopper.models import Offer
+    from shopper.service import ItemResult, line_brands
+    r = ItemResult(ItemRequest("eggs 30 pcs"))
+    r.candidates = {"metro": [Offer("metro", "Fresh Eggs 30 pcs", 160, "u")]}
+    assert line_brands(r, {"juhayna"}) == set()  # ticking Juhayna leaves the eggs alone
+    r.candidates["gourmet"] = [Offer("gourmet", "Juhayna Eggs 30 pcs", 170, "v")]
+    assert line_brands(r, {"juhayna"}) == {"juhayna"}
+
+
+async def test_research_is_stale_if_the_line_went_away_during_the_search(tmp_path):
+    import asyncio
+    app = core(tmp_path)
+    result, _, rid = await app.run(LIST)
+    task = asyncio.create_task(app.research_line(rid, 2, "eggs 30 pcs", ItemRequest("eggs 30 pcs")))
+    await asyncio.sleep(0)
+    app.edit_line(rid, 0, "Juhayna skimmed milk 1L", remove=True)
+    assert await task == "stale"
+
+
+def test_mixed_pasted_lines_and_quantity_text():
+    from shopper.parsing import parse_list
+    items = parse_list("milk | Juhayna | | 1L | | x2\neggs, bread")
+    assert [(i.qty, i.query) for i in items] == [(2, "Juhayna milk 1L"), (1, "eggs"), (1, "bread")]
+
+
+def test_only_known_brands_carry_to_other_shops():
+    from shopper.memory import product_cards
+    from shopper.models import Offer
+    cards = product_cards(ItemRequest("eggs 30 pcs"), [Offer("metro", "Fresh Eggs 30 pcs", 160, "u"),
+                                                       Offer("gourmet", "Juhayna Eggs 30 pcs", 170, "v")])
+    fresh = next(c for c in cards if c.brand == "fresh")
+    juh = next(c for c in cards if c.brand == "juhayna")
+    assert "fresh" not in fresh.words and "juhayna" in juh.words

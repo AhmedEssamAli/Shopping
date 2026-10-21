@@ -150,11 +150,12 @@ def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adap
     for r in result.items:
         if memory:
             r.recall = memory.recall(r.request)
-        r.matches = {p: match_on(r.request, p, brand_filter(offers, result.brands), r.recall, learner)
+        wanted = line_brands(r, result.brands)
+        r.matches = {p: match_on(r.request, p, brand_filter(offers, wanted), r.recall, learner)
                      for p, offers in r.candidates.items() if p not in result.excluded}
         rejected = r.recall.rejected if r.recall else set()
         r.cards = product_cards(r.request, [o for p, offers in r.candidates.items() if p not in result.excluded
-                                            for o in brand_filter(offers, result.brands)],
+                                            for o in brand_filter(offers, wanted)],
                                 r.recall.avoid if r.recall else frozenset(), rejected)
     matches, fees = _matches(result, active), _fees(result, settings, active)
     result.proposals = optimise(matches, len(result.items), fees, result.max_orders or settings.max_orders,
@@ -163,7 +164,7 @@ def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adap
     for i, r in enumerate(result.items):
         rejected = r.recall.rejected if r.recall else set()
         pool = [o for p, offers in r.candidates.items() if p not in result.excluded
-                for o in brand_filter(offers, result.brands) if (o.platform, offer_id(o)) not in rejected]
+                for o in brand_filter(offers, line_brands(r, result.brands)) if (o.platform, offer_id(o)) not in rejected]
         r.tip = value_tip(r.request, result.proposals[0].assignments.get(i), pool) if result.proposals else None
         chosen = result.proposals[0].assignments.get(i) if result.proposals else None
         r.confidence = (1.0 if chosen.pinned else learner.confidence(r.request, chosen.offer, pool)) if (chosen and learner) else None
@@ -175,6 +176,15 @@ def brand_filter(offers: list[Offer], brands: set[str]) -> list[Offer]:
         return offers
     from .memory import brand_of
     return [o for o in offers if brand_of(o.name) in brands]
+
+
+def line_brands(r: "ItemResult", brands: set[str]) -> set[str]:
+    """The brand filter applies to a line only if that line has a listing of a ticked brand:
+    ticking Juhayna for the milk must not empty the rice."""
+    if not brands:
+        return brands
+    from .memory import brand_of
+    return brands if any(brand_of(o.name) in brands for offers in r.candidates.values() for o in offers) else set()
 
 
 def _matches(result: CompareResult, active: list[Adapter]) -> dict[str, dict[int, Match]]:

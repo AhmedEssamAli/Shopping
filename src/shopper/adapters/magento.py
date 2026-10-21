@@ -53,6 +53,7 @@ class MagentoAdapter(Adapter):
         self.area: str | None = None  # the district you chose (Seoudi), shown with the branch
         self.area_cities: tuple[int, ...] = ()  # cities to offer in the area picker
         self._areas: list[dict] | None = None
+        self._area_tried = False
         self.area_wanted = ""  # district name from config/platforms.toml ("North Lotas"), used until you choose one
         self._client: httpx.AsyncClient | None = None
 
@@ -66,7 +67,8 @@ class MagentoAdapter(Adapter):
 
     async def _source_code(self) -> str | None:
         """The branch that delivers to AREA_LAT/AREA_LON, looked up once."""
-        if self._source is None and self.area_wanted and self.area_cities:
+        if self._source is None and self.area_wanted and self.area_cities and not self._area_tried:
+            self._area_tried = True  # one try per run: a failed list must not slow every search
             try:
                 want = self.area_wanted.strip().lower()
                 hit = next((a for a in await self.areas() if a["district"].lower() == want), None)

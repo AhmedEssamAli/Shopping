@@ -35,7 +35,9 @@ def parse_fields(line: str) -> ItemRequest | None:
 
 def parse_local(text: str) -> list[ItemRequest]:
     items = []
-    for raw in (text.splitlines() if "|" in text else _SPLIT.split(text)):
+    # A line written by field ("|") stays whole; other lines also split at commas and semicolons.
+    raws = [part for row in text.splitlines() for part in ([row] if "|" in row else _SPLIT.split(row))]
+    for raw in raws:
         line = raw.strip(" -•\t")
         if not line:
             continue
@@ -102,8 +104,15 @@ def parse_with_claude(text: str, api_key: str) -> list[ItemRequest]:
 
 
 def parse_list(text: str, api_key: str = "") -> list[ItemRequest]:
-    if "|" in text:  # lines written by field are read exactly; the rest by the local rules
-        return parse_local(text)
+    if "|" in text:  # lines written by field are read exactly; the others go to Claude as usual
+        rows = text.splitlines()
+        free = "\n".join(r for r in rows if "|" not in r)
+        parsed_free = iter(parse_list(free, api_key)) if free.strip() else iter(())
+        out: list[ItemRequest] = []
+        for r in rows:
+            if "|" in r:
+                out += parse_local(r)
+        return out + list(parsed_free)
     if api_key:
         try:
             return parse_with_claude(text, api_key)

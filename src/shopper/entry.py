@@ -154,7 +154,7 @@ def compose(item: str, brand: str = "", kind: str = "", size: str = "", pieces: 
         size = ""  # a bare number is not a size; the form's unit list sends "1" + "L" as "1L"
     p = str(pieces or "").strip()
     try:
-        n = max(int(str(qty).strip() or 1), 1)
+        n = max(int(str(qty).strip().strip("()").lstrip("xX×*").strip() or 1), 1)  # "2", "x2", "(2)"
     except ValueError:
         n = 1
     return Entry(item, brand, kind.lower(), size.replace(" ", ""), int(p) if p.isdigit() and int(p) > 1 else 1, n)

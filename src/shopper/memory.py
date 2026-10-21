@@ -69,6 +69,14 @@ def attributes(request: ItemRequest, o: Offer) -> tuple[str, frozenset[str], fro
     return size, frozenset(words & FORM_WORDS), frozenset((words & (VARIANT_WORDS | KIND_WORDS)) - asked)
 
 
+def known_brand(name: str) -> str:
+    """A brand shopper knows in this listing name, or ""."""
+    from .entry import BRANDS
+    low = _fold(name)
+    hit = next((b for b in sorted(BRANDS, key=len, reverse=True) if re.search(rf"(?<!\w){re.escape(_fold(b))}(?!\w)", low)), "")
+    return _fold(hit) if hit else ""
+
+
 def brand_of(name: str) -> str:
     """The brand in a listing name: a known brand, else its first word ("Sunshine Diet Tuna ...")."""
     from .entry import BRANDS
@@ -89,6 +97,7 @@ class ProductCard:
     exact: bool
     offers: list[Offer] = field(default_factory=list)
     brand: str = ""
+    brand_known: bool = False  # only a known brand is carried to other shops after a pick
 
     @property
     def name(self) -> str:
@@ -121,7 +130,7 @@ class ProductCard:
     @property
     def words(self) -> frozenset[str]:
         """Words that carry the choice to other shops: pack, variant and brand."""
-        return self.attr_words | ({w for w in tokens(self.brand)} if self.brand else set())
+        return self.attr_words | ({w for w in tokens(self.brand)} if self.brand and self.brand_known else set())
 
     @property
     def key(self) -> str:
@@ -153,7 +162,8 @@ def product_cards(request: ItemRequest, offers: list[Offer], avoid: frozenset[st
         brand = brand_of(o.name)
         # One card per product: one brand, size, pack and variant. Shops word the same
         # product differently ("Instant Coffee", "Pure Soluble Coffee"); those stay one card.
-        card = cards.setdefault((size, forms, variants, brand), ProductCard(size, forms, variants, m.exact, brand=brand))
+        card = cards.setdefault((size, forms, variants, brand),
+                                ProductCard(size, forms, variants, m.exact, brand=brand, brand_known=bool(known_brand(o.name))))
         card.exact = card.exact or m.exact
         card.offers.append(o)
     want = request.size
