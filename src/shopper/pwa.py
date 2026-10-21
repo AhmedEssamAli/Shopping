@@ -12,7 +12,7 @@ from urllib.parse import quote
 import zlib
 from functools import lru_cache
 
-THEME = "#14532d"
+THEME = "#16A34A"
 
 SERVICE_WORKER = """const OFFLINE = '/offline';
 self.addEventListener('install', e => e.waitUntil(caches.open('shopper').then(c => c.add(OFFLINE)).then(() => self.skipWaiting())));
@@ -34,7 +34,7 @@ def manifest(token: str | None) -> str:
     return json.dumps({
         "name": "shopper", "short_name": "shopper", "description": "Best basket price in New Cairo",
         "start_url": start, "scope": "/", "display": "standalone",
-        "background_color": "#fbfaf7", "theme_color": THEME,
+        "background_color": "#F8FAFC", "theme_color": THEME,
         "icons": [{"src": f"/icon-{n}.png", "sizes": f"{n}x{n}", "type": "image/png", "purpose": "any maskable"}
                   for n in (192, 512)],
     })
@@ -64,7 +64,7 @@ def icon_png(size: int) -> bytes:
         wheels = any((x - cx) ** 2 + (y - 66) ** 2 <= 25 for cx in (40, 62))
         return basket or handle or wheels
 
-    green, white = bytes((0x14, 0x53, 0x2D)), bytes((255, 255, 255))
+    green, white = bytes((0x16, 0xA3, 0x4A)), bytes((255, 255, 255))
     rows = b"".join(b"\x00" + b"".join(white if inside(x + 0.5, y + 0.5) else green for x in range(size))
                     for y in range(size))
 

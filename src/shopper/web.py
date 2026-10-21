@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from . import pwa
 from .app import App
 from .entry import BRANDS, TYPES, compose
-from .report import fields_html, page
+from .report import fields_html, page, steps_html
 
 
 def _local(iso: str) -> str:
@@ -139,8 +139,9 @@ def create_app(core: App) -> FastAPI:
     @api.get("/", response_class=HTMLResponse)
     async def home(t: str | None = Query(None)):
         check(t)
-        header = (f"<h1>What do you need?</h1><p>shopper checks every shop that delivers to "
-                  f"{escape(core.settings.area_name)} and finds the cheapest way to buy it.</p>")
+        header = (f"<span class=eyebrow>Groceries delivered to {escape(core.settings.area_name)}</span>"
+                  f"<h1>What do you need?</h1><p>Add your items. shopper checks every shop that delivers to you "
+                  f"and finds the cheapest way to buy them, after fees.</p>{steps_html(1)}")
         chosen = core.memory.chosen_lines()
         chips = ("<p class='muted small' style='margin:12px 0 6px'>Products you chose before</p><div class=chips>"
                  + "".join(f"<button type=button class=chip data-line='{escape(line)}' title='{escape(words)}'>{escape(line)}</button>"
