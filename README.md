@@ -145,7 +145,13 @@ Run `scripts\windows\install-autostart.cmd` once. Also put a shortcut to `script
 
 ## Instashop shops
 
-Instashop, like talabat, has many shops. Run `shopper instashop-shops` with Shopping Chrome open and your address set on Instashop: it prints one config line per shop it shows you. Paste the ones you use into `[instashop] shops` in `config/platforms.toml`. Each is searched in Shopping Chrome, so keep it to a few. If a search fails, the error says so and saves the page.
+Instashop, like talabat, has many shops. To search all of them:
+
+1. Open Instashop in Shopping Chrome and set your address.
+2. Run `shopper instashop-shops --save`. It saves every shop Instashop shows you to `~/.shopper/cache/instashop_shops.json`.
+3. Restart `shopper serve`. With `all_shops = true` under `[instashop]` in `config/platforms.toml` (the default), every saved shop is searched.
+
+Run step 2 again when your address or Instashop's shops change. Without `--save` the command only prints the list. Each shop is searched as a page in Shopping Chrome, at most `BROWSER_TABS` (default 4) at a time, so many shops make a comparison slower; untick shops you never use in **Filters**, or set `all_shops = false` and list shops by hand. If a search fails, the error says so and saves the page.
 
 ## talabat shops
 
@@ -202,7 +208,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · pwa.py (phone app) · cli.py · store.py (SQLite price history)
-tests/             177 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             179 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.

@@ -88,8 +88,30 @@ class BrowserSession:
             raise
 
     async def new_page(self) -> Page:
-        ctx = await self.start()
-        return await ctx.new_page()
+        """A new tab. At most BROWSER_TABS are open at once; the rest wait their turn, so
+        searching dozens of shops does not open dozens of tabs."""
+        if getattr(self, "_tabs", None) is None:
+            self._tabs = asyncio.Semaphore(getattr(self.settings, "browser_tabs", 4))
+        await self._tabs.acquire()
+        try:
+            ctx = await self.start()
+            page = await ctx.new_page()
+        except BaseException:
+            self._tabs.release()
+            raise
+        close, released = page.close, False
+
+        async def close_and_release(*a, **kw):
+            nonlocal released
+            try:
+                return await close(*a, **kw)
+            finally:
+                if not released:
+                    released = True
+                    self._tabs.release()
+
+        page.close = close_and_release
+        return page
 
     async def cookie_count(self, url: str) -> int:
         ctx = await self.start()

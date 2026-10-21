@@ -144,6 +144,10 @@ enabled = false
 status = "browser"
 enabled = true
 verified = false
+# all_shops: also search every shop saved by `shopper instashop-shops --save` (the shops Instashop
+# shows for your address). Each is a page in Shopping Chrome; at most BROWSER_TABS (default 4)
+# open at once, so many shops make a comparison slower.
+all_shops = true
 shops = [
   {slug = "mahmoud-elfar-mivida", label = "Mahmoud ElFar (Instashop)"},
 ]

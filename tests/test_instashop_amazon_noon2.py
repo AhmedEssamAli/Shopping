@@ -85,3 +85,51 @@ async def test_noon_reads_real_plp_tiles_and_skips_ads():
     assert sachet.price == 341 and sachet.regular_price == 379 and sachet.cart_ref == "bc050c6c3a83d5fe"
     assert sachet.url == "https://www.noon.com/egypt-en/classic-sachet-200grams/N28968548A/p/?o=bc050c6c3a83d5fe"
     assert best_match(ItemRequest("Nescafe classic 200g"), offers).exact
+
+
+def test_all_instashop_shops_from_the_saved_list(tmp_path):
+    import json
+    from shopper.config import INSTASHOP_CACHE, REPO_ROOT, load_platforms
+    (tmp_path / "cache").mkdir()
+    (tmp_path / INSTASHOP_CACHE).write_text(json.dumps([{"slug": "el-ezaby-pharmacy-5th", "name": "El Ezaby"},
+                                                        {"slug": "mahmoud-elfar-mivida", "name": "dup"}]))
+    plats = load_platforms(REPO_ROOT / "config" / "platforms.toml", tmp_path)
+    assert plats["instashop_el_ezaby_pharmacy_5th"].label == "El Ezaby (Instashop)"
+    assert plats["instashop_mahmoud_elfar_mivida"].label == "Mahmoud ElFar (Instashop)"  # config wins
+    assert "all_shops" not in plats["instashop_el_ezaby_pharmacy_5th"].options
+    assert "instashop_el_ezaby_pharmacy_5th" not in load_platforms(REPO_ROOT / "config" / "platforms.toml")
+
+
+async def test_browser_tabs_are_capped():
+    import asyncio
+    from types import SimpleNamespace
+    from shopper.browser import BrowserSession
+    open_now, peak = 0, 0
+
+    class Page:
+        async def close(self):
+            nonlocal open_now
+            open_now -= 1
+
+    class Ctx:
+        async def new_page(self):
+            nonlocal open_now, peak
+            open_now += 1
+            peak = max(peak, open_now)
+            return Page()
+
+    s = BrowserSession.__new__(BrowserSession)
+    s.settings = SimpleNamespace(browser_tabs=2)
+    s._tabs = None
+
+    async def start():
+        return Ctx()
+    s.start = start
+
+    async def use():
+        p = await s.new_page()
+        await asyncio.sleep(0.01)
+        await p.close()
+
+    await asyncio.gather(*(use() for _ in range(6)))
+    assert peak == 2

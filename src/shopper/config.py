@@ -39,6 +39,7 @@ class Settings:
     web_base_url: str = "http://127.0.0.1:8765"
     web_token: str = ""
     watch_interval_hours: float = 6.0
+    browser_tabs: int = 4  # most Shopping Chrome tabs open at once (many Instashop shops)
 
     @property
     def profile_dir(self) -> Path:
@@ -59,7 +60,10 @@ class Settings:
         return {n: p.fees for n, p in self.platforms.items()}
 
 
-def load_platforms(path: Path) -> dict[str, PlatformConfig]:
+INSTASHOP_CACHE = "cache/instashop_shops.json"  # under SHOPPER_HOME; written by `shopper instashop-shops --save`
+
+
+def load_platforms(path: Path, home: Path | None = None) -> dict[str, PlatformConfig]:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     out = {}
     tal = data.pop("talabat", None)
@@ -69,8 +73,15 @@ def load_platforms(path: Path) -> dict[str, PlatformConfig]:
             data[f"talabat_{shop['branch_id']}"] = {**shared, **shop, "talabat_branch": True}
     insta = data.pop("instashop", None)
     if insta:  # one platform per Instashop shop: instashop_<slug>
-        shared = {k: v for k, v in insta.items() if k != "shops"}
-        for shop in insta.get("shops", []):
+        shared = {k: v for k, v in insta.items() if k not in ("shops", "all_shops")}
+        shops = list(insta.get("shops", []))
+        cache = home / INSTASHOP_CACHE if home else None
+        if insta.get("all_shops") and cache and cache.exists():  # every shop Instashop showed for your address
+            import json
+            known = {s["slug"] for s in shops}
+            shops += [{"slug": s["slug"], "label": f"{s.get('name') or s['slug'].replace('-', ' ').title()} (Instashop)"}
+                      for s in json.loads(cache.read_text(encoding="utf-8")) if s.get("slug") and s["slug"] not in known]
+        for shop in shops:
             data[f"instashop_{shop['slug'].replace('-', '_')}"] = {**shared, **shop, "instashop_shop": True}
     for name, d in data.items():
         fees = PlatformFees(
@@ -102,7 +113,7 @@ def load_settings(platforms_file: Path | None = None) -> Settings:
     ids = {int(x) for x in env("TELEGRAM_ALLOWED_CHAT_IDS", "").replace(" ", "").split(",") if x}
     return Settings(
         home=home,
-        platforms=load_platforms(platforms_file or REPO_ROOT / "config" / "platforms.toml"),
+        platforms=load_platforms(platforms_file or REPO_ROOT / "config" / "platforms.toml", home),
         area_name=env("AREA_NAME", "New Cairo / 5th Settlement"),
         area_lat=float(env("AREA_LAT", "30.0074")),
         area_lon=float(env("AREA_LON", "31.4913")),
@@ -116,4 +127,5 @@ def load_settings(platforms_file: Path | None = None) -> Settings:
         web_base_url=(env("WEB_BASE_URL", "") or f"http://{env('WEB_HOST', '127.0.0.1')}:{env('WEB_PORT', '8765')}").rstrip("/"),
         web_token=env("WEB_TOKEN", "") or _saved_token(home),
         watch_interval_hours=float(env("WATCH_INTERVAL_HOURS", "6")),
+        browser_tabs=max(int(env("BROWSER_TABS", "4")), 1),
     )

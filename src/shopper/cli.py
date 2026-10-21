@@ -9,7 +9,7 @@
   shopper browser-check                 check that shopper can attach to Shopping Chrome, and how fast
   shopper watch-check                   re-price all watches now and print alerts
   shopper talabat-shops                 list every talabat grocery shop that delivers to you
-  shopper instashop-shops               list the Instashop shops your Shopping Chrome shows for your address
+  shopper instashop-shops [--save]      list (or save, for all_shops) the Instashop shops for your address
   shopper refresh talabat               re-read all talabat shop catalogues now (or one: talabat_<id>)
   shopper serve                         run Telegram bot + web page (home PC)
   shopper stats [--days 30]             the bulk-ordering measures from your own use
@@ -199,6 +199,16 @@ async def _cmd_instashop_shops(args) -> None:
         shops = await list_shops(session, args.url)
     finally:
         await session.close()
+    if args.save:
+        import json
+
+        from .config import INSTASHOP_CACHE
+        path = s.home / INSTASHOP_CACHE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(shops, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"Saved {len(shops)} Instashop shops to {path}. With all_shops = true in [instashop], "
+              "every one is searched from now on (restart shopper serve).")
+        return
     for v in sorted(shops, key=lambda v: (v["name"] or v["slug"]).lower()):
         mark = "*" if v["slug"] in on else " "
         name = v["name"] or v["slug"].replace("-", " ").title()
@@ -322,6 +332,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("talabat-shops").set_defaults(fn=_cmd_talabat_shops)
     sub.add_parser("browser-check").set_defaults(fn=_cmd_browser_check)
     p = sub.add_parser("instashop-shops"); p.add_argument("--url", default="https://instashop.com/en-eg")
+    p.add_argument("--save", action="store_true", help="save the list so all_shops = true searches every shop")
     p.set_defaults(fn=_cmd_instashop_shops)
     sub.add_parser("serve").set_defaults(fn=_cmd_serve)
     args = ap.parse_args(argv)
