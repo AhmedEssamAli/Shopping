@@ -36,7 +36,7 @@ def test_filter_only_after_enough_answers(tmp_path):
 async def test_yes_no_on_the_page_pins_or_rejects(tmp_path):
     app = core(tmp_path, {"seoudi": [("Nescafe Classic Coffee Jar 200g", 310.0)], "spinneys": [("Nescafe Classic Jar 200g", 289.0)]})
     client = TestClient(create_app(app))
-    page = client.post("/compare?t=k", data={"items": "Nescafe classic 200g"}, follow_redirects=True)
+    page = client.post("/compare?t=k", data={"item": ["Nescafe classic 200g"]}, follow_redirects=True)
     assert "Right product?" in page.text and "match " in page.text
     rid = page.url.path.split("/")[-1]
     m = app.results[rid].best.assignments[0]

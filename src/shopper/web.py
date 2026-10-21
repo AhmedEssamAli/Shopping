@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import pwa
 from .app import App
-from .entry import BRANDS, TYPES, compose
+from .entry import BRANDS, TYPES, compose, entry_of
 from .report import fields_html, page, stepper, steps_html
 
 
@@ -30,6 +30,62 @@ def _local(iso: str) -> str:
 
 log = logging.getLogger(__name__)
 ERRORS = {404: "Page not found", 410: "This comparison is closed", 400: "Something is missing", 500: "Something went wrong"}
+
+
+UNITS = ("", "L", "ml", "kg", "g")
+_SIZE = re.compile(r"^(\d+(?:[.,]\d+)?)\s*(ml|l|kg|g)$", re.I)
+
+
+def item_row(e=None) -> str:
+    """One row of the item form, empty or filled from an Entry (the review step)."""
+    v = lambda x: f" value='{escape(str(x))}'" if x else ""  # noqa: E731
+    amount, unit = "", ""
+    if e is not None and e.size:
+        m = _SIZE.match(e.size)
+        if m:
+            amount, unit = m.group(1), "L" if m.group(2).lower() == "l" else m.group(2).lower()
+    units = "".join(f"<option{' selected' if u == unit else ''}>{u}</option>" for u in UNITS)
+    pieces = e.pieces if e is not None and e.pieces > 1 else ""
+    return ("<div class=itemrow>"
+            f"<label><span>Item <b>*</b></span><input name=item placeholder='milk' autocomplete=off{v(e and e.item)}></label>"
+            f"<label>Brand<input name=brand list=brands placeholder='any brand' autocomplete=off{v(e and e.brand)}></label>"
+            f"<label>Type<input name=kind list=types placeholder='any type' autocomplete=off{v(e and e.type)}></label>"
+            f"<label>Size of one<span class=sizebox><input name=amount inputmode=decimal placeholder='1'{v(amount)}>"
+            f"<select name=unit aria-label=Unit>{units}</select></span></label>"
+            f"<label>Pieces in pack<input name=pieces inputmode=numeric placeholder='1'{v(pieces)}></label>"
+            "<label>How many<span class=stepper><button type=button class=dec aria-label='One less'>−</button>"
+            f"<input name=qty inputmode=numeric placeholder='1' aria-label='How many'{v(e and e.qty)}>"
+            "<button type=button class=inc aria-label='One more'>+</button></span></label>"
+            "<p class=preview></p><button type=button class='link droprow' aria-label='Remove this item'>Remove</button></div>")
+
+
+ROW_LISTS = ("<datalist id=brands>" + "".join(f"<option value='{escape(b)}'>" for b in BRANDS) + "</datalist>"
+             "<datalist id=types>" + "".join(f"<option value='{escape(x)}'>" for x in TYPES) + "</datalist>")
+
+# The item rows: "Searches for" preview, − / + quantity, add and remove rows, chips into the paste box.
+FORM_SCRIPT = ("<script>const prev=r=>{const v=n=>(r.querySelector(`[name=${n}]`).value||'').trim();"
+               "const item=v('item'),low=item.toLowerCase(),size=v('amount')&&v('unit')?v('amount')+v('unit'):'',"
+               "n=parseInt(v('pieces'))||1,qty=parseInt(v('qty'))||1;"
+               "const w=[v('brand')&&!low.includes(v('brand').toLowerCase())?v('brand'):'',"
+               "v('kind')&&!low.includes(v('kind').toLowerCase())?v('kind'):'',item,n>1?(size?n+'x'+size:n+' pcs'):size];"
+               "const p=r.querySelector('.preview');p.textContent='';if(item){p.append('Searches for: ');"
+               "const b=document.createElement('b');b.textContent=qty+' × '+w.filter(Boolean).join(' ');p.append(b)}};"
+               "const rows=document.getElementById('rows'),count=()=>{const c=document.getElementById('count');"
+               "if(c)c.textContent=[...rows.querySelectorAll('[name=item]')].filter(i=>i.value.trim()).length};"
+               "rows.querySelectorAll('.itemrow').forEach(prev);"
+               "rows.addEventListener('input',e=>{const r=e.target.closest('.itemrow');if(r){prev(r);count()}});"
+               "rows.addEventListener('change',e=>{const r=e.target.closest('.itemrow');if(r)prev(r)});"
+               "rows.addEventListener('click',e=>{const d=e.target.closest('.droprow');if(d){const r=d.closest('.itemrow');"
+               "if(rows.querySelectorAll('.itemrow').length>1)r.remove();else r.querySelectorAll('input,select').forEach(i=>i.value='');"
+               "count();return}const b=e.target.closest('.inc,.dec');if(!b)return;"
+               "const i=b.parentElement.querySelector('input'),n=(parseInt(i.value)||1)+(b.classList.contains('inc')?1:-1);"
+               "i.value=Math.max(1,n);prev(b.closest('.itemrow'))});"
+               "document.getElementById('addrow').addEventListener('click',()=>{const r=rows.querySelector('.itemrow')"
+               ".cloneNode(true);r.querySelectorAll('input,select').forEach(i=>i.value='');r.querySelector('.preview').textContent='';"
+               "rows.append(r);r.querySelector('input').focus()});"
+               "document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{"
+               "const t=document.getElementById('items');t.value=(t.value.trim()?t.value.trim()+'\\n':'')+b.dataset.line;"
+               "t.focus();b.disabled=true}))</script>")
 
 
 def _rows(*cols: list[str]) -> list[list[str]]:
@@ -146,20 +202,6 @@ def create_app(core: App) -> FastAPI:
         chips = ("<p class='muted small' style='margin:12px 0 6px'>Products you chose before</p><div class=chips>"
                  + "".join(f"<button type=button class=chip data-line='{escape(line)}' title='{escape(words)}'>{escape(line)}</button>"
                            for line, words in chosen) + "</div>") if chosen else ""
-        units = "".join(f"<option>{u}</option>" for u in ("", "L", "ml", "kg", "g"))
-        row = ("<div class=itemrow>"
-               "<label><span>Item <b>*</b></span><input name=item placeholder='milk' autocomplete=off></label>"
-               "<label>Brand<input name=brand list=brands placeholder='any brand' autocomplete=off></label>"
-               "<label>Type<input name=kind list=types placeholder='any type' autocomplete=off></label>"
-               f"<label>Size of one<span class=sizebox><input name=amount inputmode=decimal placeholder='1'>"
-               f"<select name=unit aria-label=Unit>{units}</select></span></label>"
-               "<label>Pieces in pack<input name=pieces inputmode=numeric placeholder='1'></label>"
-               "<label>How many<span class=stepper><button type=button class=dec aria-label='One less'>−</button>"
-               "<input name=qty inputmode=numeric placeholder='1' aria-label='How many'>"
-               "<button type=button class=inc aria-label='One more'>+</button></span></label>"
-               "<p class=preview></p></div>")
-        lists = ("<datalist id=brands>" + "".join(f"<option value='{escape(b)}'>" for b in BRANDS) + "</datalist>"
-                 "<datalist id=types>" + "".join(f"<option value='{escape(x)}'>" for x in TYPES) + "</datalist>")
         guide = ("<details class=choose><summary>How shopper reads an item</summary><div class=guide>"
                  "<b>Item</b><span>What it is: milk, rice, instant coffee. Required.</span>"
                  "<b>Brand</b><span>Only this brand counts as exact. Empty: any brand, cheapest wins.</span>"
@@ -175,7 +217,7 @@ def create_app(core: App) -> FastAPI:
                 f"<h2 style='margin:0 0 6px'>What do you want to buy?</h2>"
                 f"<p class='muted small' style='margin:0 0 10px'>One item per row. Only the item is required. Every field "
                 f"you fill must match; every field you leave empty is open.</p>"
-                f"<div id=rows>{row * 2}</div>{lists}<button type=button class=quiet id=addrow>Add another item</button>{guide}"
+                f"<div id=rows>{item_row() * 2}</div>{ROW_LISTS}<button type=button class=quiet id=addrow>Add another item</button>{guide}"
                 f"<details class=choose{' open' if chosen else ''}><summary>Or paste a list</summary>"
                 f"<p class='muted small' style='margin:8px 0'>One item per line, quantity first or last: "
                 f"<code>2 Juhayna full cream milk 1L</code> or <code>rice 5kg x1</code>. Arabic works too.</p>"
@@ -205,24 +247,7 @@ def create_app(core: App) -> FastAPI:
             f"<li><a href='/r/{escape(rid)}{q(t)}'>{escape(summary or 'Comparison')}</a>"
             f"<span class='muted small'>{_local(when)}</span></li>" for rid, when, summary in recent)
                 + "</ul></div>") if recent else ""
-        script = ("<script>const prev=r=>{const v=n=>(r.querySelector(`[name=${n}]`).value||'').trim();"
-                  "const item=v('item'),low=item.toLowerCase(),size=v('amount')&&v('unit')?v('amount')+v('unit'):'',"
-                  "n=parseInt(v('pieces'))||1,qty=parseInt(v('qty'))||1;"
-                  "const w=[v('brand')&&!low.includes(v('brand').toLowerCase())?v('brand'):'',"
-                  "v('kind')&&!low.includes(v('kind').toLowerCase())?v('kind'):'',item,n>1?(size?n+'x'+size:n+' pcs'):size];"
-                  "const p=r.querySelector('.preview');p.textContent='';if(item){p.append('Searches for: ');"
-                  "const b=document.createElement('b');b.textContent=qty+' × '+w.filter(Boolean).join(' ');p.append(b)}};"
-                  "document.getElementById('rows').addEventListener('input',e=>{const r=e.target.closest('.itemrow');if(r)prev(r)});"
-                  "document.getElementById('rows').addEventListener('click',e=>{const b=e.target.closest('.inc,.dec');if(!b)return;"
-                  "const i=b.parentElement.querySelector('input'),n=(parseInt(i.value)||1)+(b.classList.contains('inc')?1:-1);"
-                  "i.value=Math.max(1,n);prev(b.closest('.itemrow'))});"
-                  "document.getElementById('addrow').addEventListener('click',()=>{const r=document.querySelector('.itemrow')"
-                  ".cloneNode(true);r.querySelectorAll('input,select').forEach(i=>i.value='');r.querySelector('.preview').textContent='';"
-                  "document.getElementById('rows').append(r);r.querySelector('input').focus()});"
-                  "document.querySelectorAll('.chip').forEach(b=>b.addEventListener('click',()=>{"
-                  "const t=document.getElementById('items');t.value=(t.value.trim()?t.value.trim()+'\\n':'')+b.dataset.line;"
-                  "t.focus();b.disabled=true}))</script>")
-        return pwa.add_head(page("Compare a basket", form + saved + past + await areas_html(t) + app_prices_html(t) + shops_html() + script, header), t)
+        return pwa.add_head(page("Compare a basket", form + saved + past + await areas_html(t) + app_prices_html(t) + shops_html() + FORM_SCRIPT, header), t)
 
     @api.post("/prices/screenshot")
     async def app_screenshot(shop: str = Form(""), image: UploadFile = File(...), t: str | None = Query(None)):
@@ -269,6 +294,22 @@ def create_app(core: App) -> FastAPI:
             raise HTTPException(status_code=400, detail="Choose an area from the list.")
         return RedirectResponse(f"/{q(t)}#area", status_code=303)
 
+    def review_page(requests, t: str | None, max_orders: int, exact: bool) -> HTMLResponse:
+        """Step 2: every line as editable fields, before any shop is searched."""
+        n = len(requests)
+        header = (f"<span class=eyebrow>Nothing searched yet</span><h1>Check your list</h1>"
+                  f"<p>shopper read {n} line{'s' if n != 1 else ''} like this. Fix anything that is wrong, "
+                  f"change quantities, or remove lines. Then compare.</p>{steps_html(2)}")
+        form = (f"<form method=post action='/compare{q(t)}' class='panel plan'>"
+                f"<div id=rows>{''.join(item_row(entry_of(r)) for r in requests)}</div>{ROW_LISTS}"
+                f"<button type=button class=quiet id=addrow>Add another item</button>"
+                f"<input type=hidden name=max_orders value={int(max_orders)}>"
+                + ("<input type=hidden name=exact value=1>" if exact else "")
+                + f"<div class=actions><button>Compare <span id=count>{n}</span> items</button>"
+                f"<button class=quiet formaction='/list/save{q(t)}'>Save as my list</button>"
+                f"<a class=back href='/{q(t)}'>Back</a></div></form>")
+        return HTMLResponse(pwa.add_head(page("Check your list", form + FORM_SCRIPT, header), t))
+
     async def requests_from(items: str, rows: list[list[str]]) -> list:
         """Rows of the item form first, then any pasted lines. Rows: item, brand, type, amount, unit, pieces, qty."""
         out = []
@@ -287,6 +328,8 @@ def create_app(core: App) -> FastAPI:
         requests = await requests_from(items, _rows(item, brand, kind, amount, unit, pieces, qty))
         if not requests:
             raise HTTPException(status_code=400, detail="The list is empty. Fill in at least one item.")
+        if items.strip():  # a pasted list is checked line by line before any search
+            return review_page(requests, t, max_orders, bool(exact))
         _, _, rid = await run_or_explain(requests, max_orders=max_orders, exact_only=bool(exact))
         return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
 
@@ -311,8 +354,11 @@ def create_app(core: App) -> FastAPI:
         elif action == "compare":
             requests = core.list_items()
             if requests:
-                _, _, rid = await run_or_explain(requests)
-                return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
+                return review_page(requests, t, core.settings.max_orders, False)
+        elif action == "save":  # from the review step: the checked rows become the household list
+            requests = await requests_from("", _rows(item, brand, kind, amount, unit, pieces, qty))
+            if requests:
+                core.save_list(requests)
         else:
             raise HTTPException(status_code=404)
         return RedirectResponse(f"/{q(t)}#list-{index}" if action == "qty" else f"/{q(t)}", status_code=303)
@@ -332,11 +378,6 @@ def create_app(core: App) -> FastAPI:
         elif rid in core.push_log:
             html = html.replace("<!--cart-push-->", "<p class='muted small'>Added to your carts already: "
                                 + escape("; ".join(core.push_log[rid])) + "</p>", 1)
-        elif core.pushable(result) and not any(r.needs_pick for r in result.items):
-            names = ", ".join(core.adapters[p].label for p in core.pushable(result))
-            button = (f"<form method=post action='/r/{escape(rid)}/push{q(t)}' style='margin:16px 0 0'>"
-                      f"<button>Add the best plan to my carts ({escape(names)})</button></form>")
-            html = html.replace("<!--cart-push-->", button, 1)
         return pwa.add_head(html, t)
 
     @api.post("/r/{rid}/push")
@@ -368,6 +409,21 @@ def create_app(core: App) -> FastAPI:
             return int(qty.strip() or 0) + int(delta or 0)
         except ValueError:
             raise HTTPException(status_code=400, detail="The quantity must be a whole number.") from None
+
+    @api.post("/r/{rid}/push-shop")
+    async def push_shop(rid: str, shop: str = Form(...), t: str | None = Query(None)):
+        check(t)
+        if rid not in core.results:
+            gone("gone")
+        await core.push_shop(rid, shop)
+        return RedirectResponse(f"/r/{rid}{q(t)}#plan", status_code=303)
+
+    @api.post("/r/{rid}/done")
+    async def order_done(rid: str, shop: str = Form(...), done: int = Form(1), t: str | None = Query(None)):
+        check(t)
+        if not core.mark_done(rid, shop, bool(done)):
+            gone("gone")
+        return RedirectResponse(f"/r/{rid}{q(t)}#plan", status_code=303)
 
     @api.post("/r/{rid}/qty")
     async def line_qty(rid: str, item: int = Form(...), line: str = Form(""), qty: str = Form("1"), delta: str = Form("0"),

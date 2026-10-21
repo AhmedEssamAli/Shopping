@@ -50,6 +50,10 @@ TYPES = [
 ]
 
 
+# Words that are a product line, not a product: "Nescafe classic" is the item, not "classic".
+_GRADES = {"classic", "gold", "original", "light", "zero", "diet", "decaf"}
+
+
 @dataclass
 class Entry:
     item: str
@@ -127,6 +131,8 @@ def read_entry(text: str, qty: int = 1, brands: list[str] | None = None) -> Entr
         rest = left
     else:
         kind = ""
+        if brand and rest.lower() in _GRADES:  # "Nescafe classic": the brand names the product
+            rest = f"{brand} {rest}"
     return Entry(rest or _clean(text), brand, kind.lower(), size, pieces, max(qty, 1))
 
 

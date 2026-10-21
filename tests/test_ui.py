@@ -9,6 +9,7 @@ from shopper.bot import MY_LIST, build_bot, chunks, list_keyboard, result_keyboa
 from shopper.models import ItemRequest
 from shopper.web import create_app
 from test_memory import COFFEE, core
+from test_service import rows
 
 
 def fake_update(text=None, data=None):
@@ -111,7 +112,9 @@ def test_home_page_list_chips_recent_and_shops(tmp_path):
     client.post("/list/add?t=k", data={"items": "Nescafe classic 200g\n2 rice 5kg"})
     home = client.get("/?t=k").text
     assert "Nescafe classic 200g" in home and "Compare the list" in home and "Through Shopping Chrome" not in home
-    page = client.post("/list/compare?t=k", follow_redirects=True)
+    review = client.post("/list/compare?t=k").text
+    assert "Check your list" in review and "value='Nescafe'" in review
+    page = client.post("/compare?t=k", data=rows(app.list_items()), follow_redirects=True)
     rid = page.url.path.split("/")[-1]
     client.post(f"/r/{rid}/pick?t=k", data={"item": 0, "card": app.results[rid].items[0].cards[0].key})
     home = client.get("/?t=k").text
@@ -128,17 +131,17 @@ async def test_web_push_runs_once_and_history_pages_lose_buttons(tmp_path):
     app = core(tmp_path)
     calls = []
 
-    async def push(result):
+    async def push(result, skip=frozenset()):
         calls.append(1)
         return ["Amazon: added: 1 × pouch"]
     app.push_carts = push
     app.adapters["amazon"].supports_cart_push = True
     client = TestClient(create_app(app))
-    page = client.post("/compare?t=k", data={"items": "Nescafe classic 200g", "max_orders": 1}, follow_redirects=True)
+    page = client.post("/compare?t=k", data={"item": ["Nescafe classic 200g"], "max_orders": 1}, follow_redirects=True)
     rid = page.url.path.split("/")[-1]
-    assert "Add the best plan to my carts" not in page.text  # not final yet
+    assert "Add 1 item to cart" in page.text  # the order card offers it; the push refuses until you choose
     app.feedback(rid, "pick", 0, card=next(c.key for c in app.results[rid].items[0].cards if "pouch" in c.forms))
-    assert "Add the best plan to my carts (AMAZON)" in client.get(f"/r/{rid}?t=k").text
+    assert "Add 1 item to cart" in client.get(f"/r/{rid}?t=k").text
     first = client.post(f"/r/{rid}/push?t=k", follow_redirects=True)
     client.post(f"/r/{rid}/push?t=k")
     assert len(calls) == 1 and "added: 1 × pouch" in first.text
@@ -259,7 +262,7 @@ async def test_push_once_across_concurrent_taps(tmp_path):
     app = core(tmp_path)
     calls = []
 
-    async def push(result):
+    async def push(result, skip=frozenset()):
         calls.append(1)
         await asyncio.sleep(0.05)
         return ["added"]

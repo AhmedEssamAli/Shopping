@@ -93,7 +93,7 @@ async def test_not_this_removes_a_listing_for_that_line(tmp_path):
 def test_web_buttons_pick_and_change(tmp_path):
     app = core(tmp_path)
     client = TestClient(create_app(app))
-    page = client.post("/compare?t=k", data={"items": "Nescafe classic 200g", "max_orders": 2}, follow_redirects=True)
+    page = client.post("/compare?t=k", data={"item": ["Nescafe classic 200g"], "max_orders": 2}, follow_redirects=True)
     assert "Choose your products" in page.text and "This one" in page.text and "not this" in page.text
     rid = page.url.path.split("/")[-1]
     key = app.results[rid].items[0].cards[0].key

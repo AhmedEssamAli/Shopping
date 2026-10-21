@@ -255,7 +255,7 @@ padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:var(--card
 .notes{margin-top:28px;font-size:13px}.notes p{margin:4px 0}.warn{color:var(--danger)}
 textarea{width:100%;min-height:180px;font:inherit;padding:14px;border-radius:14px;border:2px dashed var(--line);background:var(--card);color:var(--ink)}
 textarea:focus{border-color:var(--primary);outline:none}
-.itemrow{display:grid;grid-template-columns:2fr 1.3fr 1.2fr 1.5fr .8fr .8fr;gap:8px;margin-bottom:10px;padding:10px;
+.itemrow{display:grid;grid-template-columns:2fr 1.3fr 1.2fr 1.5fr .8fr 1.2fr;gap:8px;margin-bottom:10px;padding:10px;
 border:1px solid var(--line);border-radius:12px;background:var(--page)}
 .itemrow label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:600;color:var(--muted);min-width:0}
 .itemrow label b{color:var(--danger)}
@@ -286,7 +286,8 @@ padding:8px 0;border-bottom:1px solid var(--line)}ul.list li:last-child{border-b
 .stepper button:hover{background:var(--soft);transform:none;box-shadow:none;color:var(--primary)}
 .stepper input{width:3.2em;min-height:40px;border:0;border-inline:1px solid var(--line);text-align:center;font:600 16px var(--num);background:transparent;color:var(--ink)}
 .stepper+.qty{display:none}
-.itemrow .stepper{display:grid;grid-template-columns:44px 1fr 44px;width:100%}
+.itemrow .stepper{display:grid;grid-template-columns:38px minmax(0,1fr) 38px;width:100%}
+.itemrow .stepper button{min-width:0}
 .itemrow .stepper input{border:0;border-inline:1px solid var(--line);border-radius:0;min-height:42px;padding:0;outline:0}
 .listline{display:flex;gap:14px;align-items:flex-start;min-width:0}.listline>span{min-width:0;overflow-wrap:anywhere;padding-top:8px}
 .line>header .link{margin-left:auto}
@@ -296,6 +297,17 @@ padding:8px 0;border-bottom:1px solid var(--line)}ul.list li:last-child{border-b
 background:var(--card);color:var(--ink);border:2px solid var(--line);box-shadow:var(--shadow);padding:10px 16px;text-align:left}
 .segment button small{font-weight:500;color:var(--muted);font-size:13px}.segment button:hover{background:var(--soft);color:var(--ink)}
 .segment button.on{border-color:var(--primary);background:var(--soft)}.segment button.on small{color:var(--primary)}
+/* order cards: one per shop, numbered */
+.orders{display:grid;gap:14px;margin-top:16px}@media (min-width:900px){.orders{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}}
+.order{border:1px solid var(--line);border-radius:16px;padding:16px 18px;background:var(--card)}
+.order>header{display:flex;justify-content:space-between;align-items:center}.order .eyebrow{margin-bottom:6px}
+.order .row{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+.order ul{list-style:none;margin:10px 0 0;padding:0}.order li{display:flex;justify-content:space-between;gap:12px;padding:6px 0;
+border-top:1px solid var(--line);font-size:15px}.order li>span:last-child{font-family:var(--num);font-weight:600;white-space:nowrap}
+.order.done{border-color:var(--primary);background:var(--soft)}.ok{font-size:13px;font-weight:700;color:var(--primary)}
+.progress{margin:14px 0 0;font-size:15px}
+.itemrow{position:relative}.itemrow .droprow{grid-column:1/-1;justify-self:end;margin-top:-4px}
+a.back{align-self:center;font-size:15px;color:var(--muted)}button.go{width:auto}
 /* step bar: where you are in add, review, compare, order */
 .steps{display:flex;flex-wrap:wrap;gap:6px 18px;list-style:none;margin:18px 0 0;padding:0;font-size:14px;color:var(--muted)}
 .steps li{display:flex;align-items:center;gap:8px}.steps b{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:999px;
@@ -350,22 +362,63 @@ def _link(o, cls: str = "") -> str:
     return f"<a class='{cls}' href='{escape(o.url)}' target='_blank' rel='noopener'>{escape(o.name)}</a>"
 
 
-def _plan_html(result: CompareResult, prop: Proposal, settings: Settings, adapters: dict[str, Adapter]) -> str:
+def shop_link(platform: str, lines: list, adapters: dict[str, Adapter]) -> str:
+    """Where "open shop" goes: the shop's cart link, its start page, or the site of its first product."""
+    a = adapters.get(platform)
+    link = (a.cart_link(lines) if a else None) or (a.login_url if a else "")
+    if not link and lines:
+        from urllib.parse import urlsplit
+        u = urlsplit(lines[0][0].url)
+        link = f"{u.scheme}://{u.netloc}/" if u.netloc else ""
+    return link
+
+
+def _order_cards(result: CompareResult, prop: Proposal, settings: Settings, adapters: dict[str, Adapter],
+                 base: str | None, q: str, state: dict) -> str:
+    """One numbered card per shop, largest order first, each with its one action and a Done tick."""
+    done, pushed = state.get("done", set()), state.get("pushed", {})
+    order = sorted(prop.platforms, key=lambda p: -prop.subtotals[p])
+    cards = []
+    for k, platform in enumerate(order, 1):
+        ms = [m for _, m in sorted(prop.assignments.items()) if m.offer.platform == platform]
+        lines = [(m.offer, m.request.qty) for m in ms]
+        items = "".join(
+            f"<li><span class=withimg>{_img(m.offer, 'mini')}<span><b>{m.request.qty} ×</b> {_link(m.offer)}"
+            f"{'' if m.exact else ' <span class=warn>close match</span>'}</span></span><span>{m.line_total:,.2f}</span></li>"
+            for m in ms)
+        fee = prop.fees[platform]
+        name = label(settings, platform)
+        a = adapters.get(platform)
+        count = sum(m.request.qty for m in ms)
+        is_done = platform in done
+        if not base:
+            action = ""
+        elif platform in pushed:
+            action = "<p class='muted small'>" + escape("; ".join(pushed[platform])) + "</p>"
+        elif a and a.supports_cart_push and not state.get("plan_pushed"):
+            action = _button(f"{base}/push-shop", q, f"Add {count} item{'s' if count != 1 else ''} to cart", {"shop": platform}, "go")
+        else:
+            text = "\n".join(f"{m.request.qty} × {m.offer.name}" for m in ms)
+            url = shop_link(platform, lines, adapters)
+            action = (f"<button type=button class=copy data-text='{escape(text)}' data-url='{escape(url)}'>"
+                      f"Copy list and open {escape(name)}</button>")
+        tick = _button(base and f"{base}/done", q, "Mark as not placed" if is_done else "Done: order placed",
+                       {"shop": platform, "done": 0 if is_done else 1}, "quiet" if not is_done else "link")
+        cards.append(f"<article class='order{' done' if is_done else ''}' id=order-{k}>"
+                     f"<header><span class=eyebrow>Order {k} of {len(order)}</span>{'<span class=ok>Placed</span>' if is_done else ''}</header>"
+                     f"<div class=row><h3>{escape(name)}</h3><span class=num>{prop.subtotals[platform] + fee:,.2f}</span></div>"
+                     f"<div class='muted small'>{count} item{'s' if count != 1 else ''} · items {prop.subtotals[platform]:,.2f} · "
+                     f"fees {fee:,.2f}</div><ul>{items}</ul><div class=actions>{action}{tick}</div></article>")
+    placed = len(done & set(order))
+    head = (f"<p class=progress><b>{placed} of {len(order)}</b> order{'s' if len(order) != 1 else ''} placed</p>"
+            if base and len(order) > 1 else "")
+    return head + "<div class=orders>" + "".join(cards) + "</div>"
+
+
+def _plan_html(result: CompareResult, prop: Proposal, settings: Settings, adapters: dict[str, Adapter],
+               base: str | None = None, q: str = "", state: dict | None = None) -> str:
     shops = " and ".join(label(settings, p) for p in prop.platforms)
     split = "one order" if len(prop.platforms) == 1 else f"{len(prop.platforms)} orders"
-    bags = []
-    for platform in prop.platforms:
-        items = "".join(
-            f"<li><span class=withimg>{_img(m.offer, 'mini')}<span>{m.request.qty} × {_link(m.offer)}"
-            f"{'' if m.exact else ' <span class=warn>close match</span>'}</span></span>"
-            f"<span>{m.line_total:,.2f}</span></li>"
-            for _, m in sorted(prop.assignments.items()) if m.offer.platform == platform)
-        fee = prop.fees[platform]
-        bags.append(f"<div class=bag><div class=row><h3>{escape(label(settings, platform))}</h3>"
-                    f"<span class=num>{prop.subtotals[platform] + fee:,.2f}</span></div>"
-                    f"<div class='muted small'>items {prop.subtotals[platform]:,.2f}, fees {fee:,.2f}</div><ul>{items}</ul></div>")
-    links = "".join(f"<p class=small><a href='{escape(u)}' target='_blank' rel='noopener'>Open the {escape(label(settings, p))} cart</a></p>"
-                    for p, u in cart_links(result, prop, adapters).items())
     missing = ("<p class='warn small'>Not found anywhere: " + escape("; ".join(result.items[i].request.query for i in prop.missing))
                + "</p>") if prop.missing else ""
     single = result.single
@@ -374,7 +427,8 @@ def _plan_html(result: CompareResult, prop: Proposal, settings: Settings, adapte
         saving = (f"<p class=saving>You save <b>{_egp(single.total - prop.total)}</b> against buying everything at "
                   f"{escape(label(settings, single.platforms[0]))} ({_egp(single.total)}).</p>")
     return (f"<div class=head><h2 id=plan>Best plan</h2>{_tag(prop.total, big=True)}</div>"
-            f"<p class='muted small'>{escape(shops)}, {split}</p>{saving}{''.join(bags)}{links}{missing}<!--cart-push-->")
+            f"<p class='muted small'>{escape(shops)}, {split}</p>{saving}{missing}"
+            f"{_order_cards(result, prop, settings, adapters, base, q, state or {})}<!--cart-push-->")
 
 
 def _one_shop_html(result: CompareResult, settings: Settings) -> str:
@@ -507,16 +561,17 @@ def _orders_html(result: CompareResult, settings: Settings, options: dict | None
 
 def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapter],
             base: str | None = None, token: str | None = None, learned: dict[str, int] | None = None,
-            options: dict | None = None, undo: bool = False) -> str:
+            options: dict | None = None, undo: bool = False, orders: dict | None = None) -> str:
     """``base`` (like "/r/<id>") turns on the pick / not this / change buttons, quantities and order limits."""
     q = f"?t={escape(token)}" if token else ""
     n = len(result.items)
     when = result.created_at.astimezone().strftime("%d %b, %H:%M")
     header = (f"<span class=eyebrow>{len(result.platforms)} shops searched</span><h1>Your plan</h1>"
               f"<p>{n} item{'s' if n != 1 else ''} for {escape(settings.area_name)}, prices from {when}. "
-              f"Check the total in the app before you pay.</p>{steps_html(3)}")
+              f"Check the total in the app before you pay.</p>"
+              f"{steps_html(4 if result.best and not any(r.needs_pick for r in result.items) else 3)}")
     pending = [r for r in result.items if r.needs_pick]
-    plan = (_plan_html(result, result.best, settings, adapters) if result.best
+    plan = (_plan_html(result, result.best, settings, adapters, base, q, orders) if result.best
             else f"<h2>No plan yet</h2><p class=muted>{escape(_no_plan(result))}</p>")
     notice = (f"<p class=notice><b>Not final.</b> Several products fit {len(pending)} line{'s' if len(pending) != 1 else ''}. "
               "Choose yours below; shopper remembers it for next time.</p>") if pending else ""
@@ -550,7 +605,10 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     body = (f"{_orders_html(result, settings, options, base, q)}<div class='panel plan'>{plan}</div>{undo_html}{refresh}{notice}"
             f"{_one_shop_html(result, settings)}{tips_html}"
             f"<h2>{'Choose your products and compare' if pending else 'Every price, item by item'}</h2>{lines}{notes_html}{bar}")
-    return page("Basket comparison", body, header)
+    script = ("<script>document.querySelectorAll('button.copy').forEach(b=>b.addEventListener('click',async()=>{"
+              "try{await navigator.clipboard.writeText(b.dataset.text);b.textContent='Copied. Opening the shop…'}"
+              "catch(e){prompt('Copy this list',b.dataset.text)}if(b.dataset.url)window.open(b.dataset.url,'_blank','noopener')}))</script>")
+    return page("Basket comparison", body + script, header)
 
 
 def debug_text(result: CompareResult, settings: Settings, top: int = 3) -> str:

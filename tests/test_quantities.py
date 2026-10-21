@@ -5,7 +5,7 @@ from shopper.config import PlatformConfig, PlatformFees, Settings
 from shopper.app import App
 from shopper.models import ItemRequest
 from shopper.web import create_app
-from test_service import Fake as _Fake
+from test_service import Fake as _Fake, rows
 
 
 class Fake(_Fake):
@@ -58,7 +58,7 @@ async def test_result_page_steppers_and_segment(tmp_path):
     app = core(tmp_path)
     client = TestClient(create_app(app))
     app.add_to_list(LIST)
-    page = client.post("/list/compare?t=k", follow_redirects=True)
+    page = client.post("/compare?t=k", data=rows(app.list_items()), follow_redirects=True)
     rid = page.url.path.split("/")[-1]
     assert "class=stepper" in page.text and "Up to 2 shops" in page.text and "1 shop" in page.text
     r = client.post(f"/r/{rid}/qty?t=k", data={"item": 0, "line": "Juhayna skimmed milk 1L", "qty": "2", "delta": "1"},
@@ -90,3 +90,42 @@ def test_household_list_steppers(tmp_path):
     assert app.list_items()[0].qty == 3
     client.post("/list/qty?t=k", data={"index": 2, "line": "eggs 30 pcs", "qty": "1", "delta": "-1"})
     assert [i.query for i in app.list_items()] == ["Juhayna skimmed milk 1L", "Al Doha basmati rice 5kg"]
+
+
+def test_pasted_list_goes_to_the_review_step(tmp_path):
+    app = core(tmp_path)
+    client = TestClient(create_app(app))
+    page = client.post("/compare?t=k", data={"items": "4 Juhayna skimmed milk 1L\nAl Doha basmati rice 5kg\neggs 30 pcs"})
+    assert page.status_code == 200 and "Check your list" in page.text and "Nothing searched yet" in page.text
+    assert not app.results  # no shop searched yet
+    assert page.text.count("class=itemrow") == 3 and "value='Juhayna'" in page.text and "value='skimmed'" in page.text
+    assert "<option selected>L</option>" in page.text and "value='30'" in page.text and "value='4'" in page.text
+    assert "Compare <span id=count>3</span> items" in page.text and "aria-current=step><b>2</b>" in page.text
+    # The rows as shown (after edits) are what gets compared, or saved as the list.
+    data = {"item": ["milk", "rice"], "brand": ["Juhayna", "Al Doha"], "kind": ["skimmed", "basmati"], "amount": ["1", "5"],
+            "unit": ["L", "kg"], "pieces": ["", ""], "qty": ["5", "1"]}
+    client.post("/list/save?t=k", data=data)
+    assert [(i.qty, i.query) for i in app.list_items()] == [(5, "Juhayna skimmed milk 1L"), (1, "Al Doha basmati rice 5kg")]
+    done = client.post("/compare?t=k", data=data, follow_redirects=True)
+    rid = done.url.path.split("/")[-1]
+    assert [(r.request.qty, r.request.query) for r in app.results[rid].items] == [(5, "Juhayna skimmed milk 1L"),
+                                                                                  (1, "Al Doha basmati rice 5kg")]
+    assert "Check your list" in client.post("/list/compare?t=k").text
+
+
+async def test_order_cards_copy_tick_and_progress(tmp_path):
+    app = core(tmp_path)
+    result, _, rid = await app.run(LIST, max_orders=2)
+    client = TestClient(create_app(app))
+    page = client.get(f"/r/{rid}?t=k").text
+    n = len(result.best.platforms)
+    assert f"Order 1 of {n}" in page and "Copy list and open" in page and "data-text='2 × Juhayna Skimmed Milk 1L" in page
+    if n > 1:
+        assert f"<b>0 of {n}</b> orders placed" in page
+    shop = result.best.platforms[0]
+    page = client.post(f"/r/{rid}/done?t=k", data={"shop": shop, "done": 1}, follow_redirects=True).text
+    assert "Placed" in page and "Mark as not placed" in page and "aria-current=step><b>4</b>" in page
+    client.post(f"/r/{rid}/done?t=k", data={"shop": shop, "done": 0})
+    assert "Mark as not placed" not in client.get(f"/r/{rid}?t=k").text
+    app.results.clear()
+    assert client.post(f"/r/{rid}/done?t=k", data={"shop": shop}).status_code == 410

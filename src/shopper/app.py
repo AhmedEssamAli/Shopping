@@ -36,6 +36,8 @@ class App:
         self.results: dict[str, CompareResult] = {}
         self.push_log: dict[str, list[str]] = {}  # result id -> what its cart push reported, from bot or web
         self.removed: dict[str, tuple[int, object]] = {}  # result id -> last line removed there, for Undo
+        self.shop_pushes: dict[tuple[str, str], list[str]] = {}  # (result id, shop) -> what one order card's push did
+        self.done: dict[str, set[str]] = {}  # result id -> shops whose order you ticked as placed
         for name, a in self.adapters.items():  # the delivery area you chose on the home page
             saved = self.store.pref(f"area:{name}")
             if saved and hasattr(a, "use_area"):
@@ -92,7 +94,10 @@ class App:
         result = self.results[rid]
         html = to_html(result, self.settings, self.adapters, base=f"/r/{rid}",
                        token=self.settings.web_token, learned={**self.memory.learned(), "answers": self.learner.answers},
-                       options=plan_options(result, self.settings, self.adapters), undo=rid in self.removed)
+                       options=plan_options(result, self.settings, self.adapters), undo=rid in self.removed,
+                       orders={"done": self.done.get(rid, set()),
+                               "pushed": {s: v for (r, s), v in self.shop_pushes.items() if r == rid},
+                               "plan_pushed": self.push_log.get(rid)})
         n = len(result.items)
         lines = ", ".join(r.request.query for r in result.items[:3]) + ("…" if n > 3 else "")
         total = f"EGP {result.best.total:,.2f}" if result.best else "no plan"
@@ -227,14 +232,47 @@ class App:
             return await self.push_carts(result)  # refuses, and is not recorded, so it can run after the pick
         self.push_log[rid] = ["Adding to your carts now…"]  # claimed before the first await
         try:
-            self.push_log[rid] = await self.push_carts(result)
+            self.push_log[rid] = await self.push_carts(result, {s for r, s in self.shop_pushes if r == rid})
         except Exception:
             del self.push_log[rid]
             raise
         return self.push_log[rid]
 
-    async def push_carts(self, result: CompareResult) -> list[str]:
-        """Put the best plan into your real carts where the platform allows it; otherwise say how."""
+    async def push_shop(self, rid: str, shop: str) -> list[str]:
+        """One order card's "Add to cart": push that shop's lines once. Refused after a whole-plan push."""
+        result = self.results.get(rid)
+        if result is None:
+            return ["This comparison is no longer open. Compare the list again."]
+        if rid in self.push_log:
+            return ["Already added with the whole plan:", *self.push_log[rid]]
+        if (rid, shop) in self.shop_pushes:
+            return self.shop_pushes[(rid, shop)]
+        a, best = self.adapters.get(shop), result.best
+        if not best or shop not in best.platforms or not (a and a.supports_cart_push):
+            return [f"{a.label if a else shop}: shopper cannot fill this cart."]
+        if any(r.needs_pick for r in result.items):
+            return ["Not added: choose your product first for "
+                    + "; ".join(r.request.query for r in result.items if r.needs_pick) + "."]
+        self.shop_pushes[(rid, shop)] = ["Adding to your cart now…"]  # claimed before the first await
+        lines = [(m.offer, m.request.qty) for m in best.assignments.values() if m.offer.platform == shop]
+        try:
+            self.shop_pushes[(rid, shop)] = [f"{a.label}: {x}" for x in await a.add_to_cart(lines)]
+        except Exception as e:
+            self.shop_pushes[(rid, shop)] = [f"{a.label}: cart push failed: {type(e).__name__}: {e}"]
+        self.done.setdefault(rid, set()).add(shop)
+        self._render(rid)
+        return self.shop_pushes[(rid, shop)]
+
+    def mark_done(self, rid: str, shop: str, done: bool = True) -> bool:
+        if rid not in self.results:
+            return False
+        (self.done.setdefault(rid, set()).add if done else self.done.setdefault(rid, set()).discard)(shop)
+        self._render(rid)
+        return True
+
+    async def push_carts(self, result: CompareResult, skip: set[str] = frozenset()) -> list[str]:
+        """Put the best plan into your real carts where the platform allows it; otherwise say how.
+        ``skip``: shops already pushed from their order card."""
         best = result.best
         if not best:
             return ["Nothing to push: no plan."]
@@ -246,6 +284,9 @@ class App:
             a = self.adapters.get(platform)
             lines = [(m.offer, m.request.qty) for m in best.assignments.values() if m.offer.platform == platform]
             name = a.label if a else platform
+            if platform in skip:
+                out.append(f"{name}: already added from its order card")
+                continue
             if a and a.supports_cart_push:
                 try:
                     out += [f"{name}: {x}" for x in await a.add_to_cart(lines)]

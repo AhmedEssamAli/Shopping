@@ -20,6 +20,11 @@ class Fake(Adapter):
         return [Offer(self.name, n, p, f"https://{self.name}/{i}") for i, (n, p) in enumerate(self.catalogue)]
 
 
+def rows(requests) -> dict:
+    """The item form's fields for these lines, as the review step posts them."""
+    return {"item": [r.query for r in requests], "qty": [str(r.qty) for r in requests]}
+
+
 class Broken(Adapter):
     name = label = "broken"
 
@@ -74,7 +79,7 @@ def test_web_token_and_flow(tmp_path):
     client = TestClient(create_app(core))
     assert client.get("/").status_code == 404
     assert client.get("/?t=secret").status_code == 200
-    resp = client.post("/compare?t=secret", data={"items": "2 Juhayna full cream milk 1L\nEgyptian rice 5kg", "max_orders": 2},
+    resp = client.post("/compare?t=secret", data={"item": ["Juhayna full cream milk 1L", "Egyptian rice 5kg"], "qty": ["2", ""], "max_orders": 2},
                        follow_redirects=True)
     assert resp.status_code == 200 and "Basket comparison" in resp.text
     assert client.get("/r/nope?t=secret").status_code == 404
@@ -135,10 +140,11 @@ def test_web_is_an_installable_app_with_cart_button(tmp_path):
     assert png.headers["content-type"] == "image/png" and png.content[:8] == b"\x89PNG\r\n\x1a\n"
     assert "offline" in client.get("/sw.js").text and client.get("/offline").status_code == 200
 
-    page = client.post("/compare?t=secret", data={"items": "Juhayna full cream milk 1L", "max_orders": 2},
+    page = client.post("/compare?t=secret", data={"item": ["Juhayna full cream milk 1L"], "max_orders": 2},
                        follow_redirects=True)
-    assert "Add the best plan to my carts (A)" in page.text
+    assert "Add 1 item to cart" in page.text and "/push-shop?t=secret" in page.text
     rid = page.url.path.split("/")[-1]
-    pushed = client.post(f"/r/{rid}/push?t=secret")
-    assert "added: 1 × Juhayna Full Cream Milk 1L" in pushed.text
+    pushed = client.post(f"/r/{rid}/push-shop?t=secret", data={"shop": "a"}, follow_redirects=True)
+    assert "added: 1 × Juhayna Full Cream Milk 1L" in pushed.text and "Placed" in pushed.text
+    assert "already added from its order card" in client.post(f"/r/{rid}/push?t=secret").text
     assert client.post(f"/r/{rid}/push").status_code == 404
