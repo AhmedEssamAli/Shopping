@@ -17,8 +17,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from . import pwa
 from .app import App
 from .models import now_utc
-from .entry import BRANDS, TYPES, compose, entry_of
-from .report import fields_html, page, stepper, steps_html
+from .entry import compose, entry_of
+from .report import ROW_LISTS, fields_html, item_row, page, stepper, steps_html
 
 
 def _local(iso: str) -> str:
@@ -32,36 +32,6 @@ def _local(iso: str) -> str:
 log = logging.getLogger(__name__)
 ERRORS = {404: "Page not found", 410: "This comparison is closed", 400: "Something is missing", 500: "Something went wrong"}
 
-
-UNITS = ("", "L", "ml", "kg", "g")
-_SIZE = re.compile(r"^(\d+(?:[.,]\d+)?)\s*(ml|l|kg|g)$", re.I)
-
-
-def item_row(e=None) -> str:
-    """One row of the item form, empty or filled from an Entry (the review step)."""
-    v = lambda x: f" value='{escape(str(x))}'" if x else ""  # noqa: E731
-    amount, unit = "", ""
-    if e is not None and e.size:
-        m = _SIZE.match(e.size)
-        if m:
-            amount, unit = m.group(1), "L" if m.group(2).lower() == "l" else m.group(2).lower()
-    units = "".join(f"<option{' selected' if u == unit else ''}>{u}</option>" for u in UNITS)
-    pieces = e.pieces if e is not None and e.pieces > 1 else ""
-    return ("<div class=itemrow>"
-            f"<label><span>Item <b>*</b></span><input name=item list=past placeholder='milk' autocomplete=off{v(e and e.item)}></label>"
-            f"<label>Brand<input name=brand list=brands placeholder='any brand' autocomplete=off{v(e and e.brand)}></label>"
-            f"<label>Type<input name=kind list=types placeholder='any type' autocomplete=off{v(e and e.type)}></label>"
-            f"<label>Size of one<span class=sizebox><input name=amount inputmode=decimal placeholder='1'{v(amount)}>"
-            f"<select name=unit aria-label=Unit>{units}</select></span></label>"
-            f"<label>Pieces in pack<input name=pieces inputmode=numeric placeholder='1'{v(pieces)}></label>"
-            "<label>How many<span class=stepper><button type=button class=dec aria-label='One less'>−</button>"
-            f"<input name=qty inputmode=numeric placeholder='1' aria-label='How many'{v(e and e.qty)}>"
-            "<button type=button class=inc aria-label='One more'>+</button></span></label>"
-            "<p class=preview></p><button type=button class='link droprow' aria-label='Remove this item'>Remove</button></div>")
-
-
-ROW_LISTS = ("<datalist id=brands>" + "".join(f"<option value='{escape(b)}'>" for b in BRANDS) + "</datalist>"
-             "<datalist id=types>" + "".join(f"<option value='{escape(x)}'>" for x in TYPES) + "</datalist>")
 
 # The item rows: "Searches for" preview, − / + quantity, add and remove rows, chips into the paste box.
 FORM_SCRIPT = ("<script>const prev=r=>{const v=n=>(r.querySelector(`[name=${n}]`).value||'').trim();"
@@ -467,6 +437,18 @@ def create_app(core: App) -> FastAPI:
             gone("gone")
         return review_page([r.request for r in result.items], t, result.max_orders or core.settings.max_orders,
                            result.exact_only)
+
+    @api.post("/r/{rid}/research")
+    async def research(rid: str, index: int = Form(...), line: str = Form(""), item: str = Form(""), brand: str = Form(""),
+                       kind: str = Form(""), amount: str = Form(""), unit: str = Form(""), pieces: str = Form(""),
+                       qty: str = Form(""), t: str | None = Query(None)):
+        """A line's "Search again": its adjusted fields, searched in every shop of this comparison."""
+        check(t)
+        e = compose(item, brand, kind, f"{amount.strip()}{unit}" if amount.strip() and unit else "", pieces, qty)
+        if e is None:
+            raise HTTPException(status_code=400, detail="The item field is empty. Go back and fill it in.")
+        gone(await core.research_line(rid, index, line or None, e.request()))
+        return RedirectResponse(f"/r/{rid}{q(t)}#line-{index}", status_code=303)
 
     @api.post("/r/{rid}/push-shop")
     async def push_shop(rid: str, shop: str = Form(...), t: str | None = Query(None)):

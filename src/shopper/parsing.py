@@ -25,11 +25,24 @@ _LEAD_QTY = re.compile(r"^\s*(\d{1,3})(?:\s*[x×*]\s*|\s+)(\D.*)$", re.I)
 _TRAIL_QTY = re.compile(r"^(.+?)\s*(?:[x×*]\s*(\d{1,3})|\((\d{1,3})\))\s*$", re.I)
 
 
+def parse_fields(line: str) -> ItemRequest | None:
+    """A line written by field, with "|": item | brand | type | size | pieces | how many.
+    Read by position only; empty fields stay open. "milk | Juhayna | skimmed | 1L | 6 | 2"."""
+    cols = [c.strip() for c in line.split("|")] + [""] * 6
+    e = compose(*cols[:6])
+    return e.request() if e else None
+
+
 def parse_local(text: str) -> list[ItemRequest]:
     items = []
-    for raw in _SPLIT.split(text):
+    for raw in (text.splitlines() if "|" in text else _SPLIT.split(text)):
         line = raw.strip(" -•\t")
         if not line:
+            continue
+        if "|" in line:  # written by field: nothing is guessed
+            r = parse_fields(line)
+            if r:
+                items.append(r)
             continue
         qty = 1
         m = _LEAD_QTY.match(line)
@@ -89,6 +102,8 @@ def parse_with_claude(text: str, api_key: str) -> list[ItemRequest]:
 
 
 def parse_list(text: str, api_key: str = "") -> list[ItemRequest]:
+    if "|" in text:  # lines written by field are read exactly; the rest by the local rules
+        return parse_local(text)
     if api_key:
         try:
             return parse_with_claude(text, api_key)

@@ -34,7 +34,8 @@ class ItemResult:
     @property
     def needs_pick(self) -> bool:
         """More than one distinct product fits the line and you have not chosen yet."""
-        return not self.pinned and sum(c.exact for c in self.cards) > 1
+        # Brands alone do not ask: an empty brand field means any brand, cheapest wins.
+        return not self.pinned and len({c.group for c in self.cards if c.exact}) > 1
 
 
 @dataclass
@@ -110,6 +111,28 @@ async def compare(
     await asyncio.gather(*(run(i, a) for i in range(len(requests)) for a in active))
     result = CompareResult(results, [a.name for a in active], [], errors, [], max_orders=max_orders, exact_only=exact_only)
     return assemble(result, settings, adapters, learner=learner)
+
+
+async def search_line(request: ItemRequest, settings: Settings, adapters: dict[str, Adapter], platforms: list[str],
+                      memory: Memory | None = None) -> tuple[ItemResult, dict[str, str]]:
+    """Search every given shop for one line (the "Search again" of a line). Returns the line and errors."""
+    r = ItemResult(request, recall=memory.recall(request) if memory else None)
+    errors: dict[str, str] = {}
+    active = [adapters[p] for p in platforms if p in adapters]
+    limits = {a.name: asyncio.Semaphore(1) for a in active}
+
+    async def run(a: Adapter) -> None:
+        async with limits[a.name]:
+            try:
+                r.candidates[a.name] = await a.search(search_phrase(request, r.recall))
+            except NotCalibrated as e:
+                errors[a.name] = str(e)
+            except Exception as e:
+                log.exception("%s search failed", a.name)
+                errors[a.name] = f"{type(e).__name__}: {e}"
+
+    await asyncio.gather(*(run(a) for a in active))
+    return r, errors
 
 
 def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adapter],

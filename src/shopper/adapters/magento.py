@@ -53,6 +53,7 @@ class MagentoAdapter(Adapter):
         self.area: str | None = None  # the district you chose (Seoudi), shown with the branch
         self.area_cities: tuple[int, ...] = ()  # cities to offer in the area picker
         self._areas: list[dict] | None = None
+        self.area_wanted = ""  # district name from config/platforms.toml ("North Lotas"), used until you choose one
         self._client: httpx.AsyncClient | None = None
 
     def _http(self) -> httpx.AsyncClient:
@@ -65,6 +66,16 @@ class MagentoAdapter(Adapter):
 
     async def _source_code(self) -> str | None:
         """The branch that delivers to AREA_LAT/AREA_LON, looked up once."""
+        if self._source is None and self.area_wanted and self.area_cities:
+            try:
+                want = self.area_wanted.strip().lower()
+                hit = next((a for a in await self.areas() if a["district"].lower() == want), None)
+                if hit:
+                    self.use_area(hit)
+                    return self._source
+                log.warning("%s: no district named %r in its area list; using the map point", self.label, self.area_wanted)
+            except Exception as e:  # noqa: BLE001 - fall back to the map point
+                log.warning("%s: area list unavailable (%s); using the map point", self.label, e)
         if self.branch_at is None or self._source is not None:
             return self._source
         lat, lon = self.branch_at
@@ -149,10 +160,11 @@ def gourmet() -> MagentoAdapter:
 SEOUDI_CITIES = (25, 31, 125, 87, 121, 118, 135)
 
 
-def seoudi(at: tuple[float, float] | None = None) -> MagentoAdapter:
+def seoudi(at: tuple[float, float] | None = None, area: str = "") -> MagentoAdapter:
     a = MagentoAdapter("seoudi", "Seoudi Market", "https://mcprod.seoudisupermarket.com/graphql",
                        "https://seoudisupermarket.com/en", login_url="https://seoudisupermarket.com/en", branch_at=at)
     a.area_cities = SEOUDI_CITIES
+    a.area_wanted = area
     return a
 
 

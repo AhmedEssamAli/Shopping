@@ -14,7 +14,7 @@ from .config import Settings, load_settings
 from .models import ItemRequest
 from .parsing import parse_list
 from .report import to_chat, to_html, to_text
-from .service import CompareResult, all_offers, assemble, compare, plan_options
+from .service import CompareResult, all_offers, assemble, compare, plan_options, search_line
 from .store import Store
 
 
@@ -136,6 +136,24 @@ class App:
             r = result.items[item]
             r.request = ItemRequest(r.request.query, min(qty, 999))
             self.store.log("qty", rid, r.request.query)
+        self._replan(rid)
+        return "ok"
+
+    async def research_line(self, rid: str, item: int, expect: str | None, request: ItemRequest) -> str:
+        """Search all shops again for one line, with the fields you adjusted. Returns "ok", "stale" or "gone"."""
+        result = self.results.get(rid)
+        if result is None:
+            return "gone"
+        if not 0 <= item < len(result.items) or (expect is not None and result.items[item].request.query != expect):
+            return "stale"
+        line, errors = await search_line(request, self.settings, self.adapters, result.platforms, self.memory)
+        if result.items[item].request.query != (expect or result.items[item].request.query):
+            return "stale"  # the line changed while the shops were searched
+        result.items[item] = line
+        for p, e in errors.items():
+            result.errors.setdefault(p, e)
+        self.store.record_offers([o for offers in line.candidates.values() for o in offers])
+        self.store.log("research", rid, request.query)
         self._replan(rid)
         return "ok"
 

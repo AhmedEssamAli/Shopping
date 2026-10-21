@@ -13,11 +13,12 @@ them is a direct answer, so storing it is exact from the first pick.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 import zlib
 from dataclasses import dataclass, field
 
-from .matching import ACCEPT_SCORE, VARIANT_WORDS, score, tokens
+from .matching import ACCEPT_SCORE, VARIANT_WORDS, _fold, score, tokens
 from .models import ItemRequest, Offer, now_utc
 
 # Words that name a pack type. Two offers that differ only here are different products to
@@ -30,6 +31,7 @@ FORM_WORDS = {
 # split cards, so a short line like "rice 5kg" asks which one, but never block a match.
 KIND_WORDS = {
     "basmati", "jasmine", "egyptian", "brown", "parboiled", "sella", "wholegrain", "wholemeal", "multigrain", "decaf",
+    "chunks", "shredded", "flakes", "slices", "sliced", "minced", "ground", "whole", "fillet", "fillets",
 }
 AVOID_AFTER = 2  # rejections of a word, with no pick, before it blocks exact matches
 
@@ -67,30 +69,64 @@ def attributes(request: ItemRequest, o: Offer) -> tuple[str, frozenset[str], fro
     return size, frozenset(words & FORM_WORDS), frozenset((words & (VARIANT_WORDS | KIND_WORDS)) - asked)
 
 
+def brand_of(name: str) -> str:
+    """The brand in a listing name: a known brand, else its first word ("Sunshine Diet Tuna ...")."""
+    from .entry import BRANDS
+    low = _fold(name)
+    known = next((b for b in sorted(BRANDS, key=len, reverse=True) if re.search(rf"(?<!\w){re.escape(_fold(b))}(?!\w)", low)), "")
+    if known:
+        return _fold(known)
+    first = tokens(name)
+    return first[0] if first else ""
+
+
 @dataclass
 class ProductCard:
-    """One distinct product for a line, with its listings across platforms."""
+    """One product for a line (one brand, one name, one size and pack), with its listings across shops."""
     size: str
     forms: frozenset[str]
     variants: frozenset[str]
     exact: bool
     offers: list[Offer] = field(default_factory=list)
+    brand: str = ""
+
+    @property
+    def name(self) -> str:
+        """The product's name, as the cheapest shop writes it."""
+        return self.cheapest().name
 
     @property
     def label(self) -> str:
+        parts = [self.name]
+        if self.size and self.size.lower() not in self.name.lower().replace(" ", ""):
+            parts.append(self.size)
+        return ", ".join(parts)
+
+    @property
+    def detail(self) -> str:
         parts = [self.size or "size not stated", " ".join(sorted(self.forms)) or "pack type not stated"]
         if self.variants:
             parts.append(" ".join(sorted(self.variants)))
         return ", ".join(parts)
 
     @property
-    def words(self) -> frozenset[str]:
+    def group(self) -> tuple:
+        """Size, pack and variant: what tells products apart beyond the brand."""
+        return self.size, self.forms, self.variants
+
+    @property
+    def attr_words(self) -> frozenset[str]:
         return self.forms | self.variants
 
     @property
+    def words(self) -> frozenset[str]:
+        """Words that carry the choice to other shops: pack, variant and brand."""
+        return self.attr_words | ({w for w in tokens(self.brand)} if self.brand else set())
+
+    @property
     def key(self) -> str:
-        """Stable id: the same product gets the same key after cards are re-sorted."""
-        return _short_hash(f"{self.size}|{' '.join(sorted(self.forms))}|{' '.join(sorted(self.variants))}")
+        """Stable id: the same product gets the same key after cards are re-sorted or searched again."""
+        return _short_hash(f"{self.size}|{' '.join(sorted(self.forms))}|{' '.join(sorted(self.variants))}|{self.brand}")
 
     def cheapest(self) -> Offer:
         return min(self.offers, key=lambda o: o.price)
@@ -103,7 +139,7 @@ class ProductCard:
 
 
 def product_cards(request: ItemRequest, offers: list[Offer], avoid: frozenset[str] = frozenset(),
-                  rejected: set[tuple[str, str]] | frozenset = frozenset(), limit: int = 6) -> list[ProductCard]:
+                  rejected: set[tuple[str, str]] | frozenset = frozenset(), limit: int = 8) -> list[ProductCard]:
     """Group acceptable offers into distinct products, exact ones first, cheapest first.
     Words you avoid still show, as non-exact cards; listings you rejected do not show."""
     cards: dict[tuple, ProductCard] = {}
@@ -114,8 +150,10 @@ def product_cards(request: ItemRequest, offers: list[Offer], avoid: frozenset[st
         if not o.in_stock or m.score < ACCEPT_SCORE:
             continue
         size, forms, variants = attributes(request, o)
-        key = (size, forms, variants)
-        card = cards.setdefault(key, ProductCard(size, forms, variants, m.exact))
+        brand = brand_of(o.name)
+        # One card per product: one brand, size, pack and variant. Shops word the same
+        # product differently ("Instant Coffee", "Pure Soluble Coffee"); those stay one card.
+        card = cards.setdefault((size, forms, variants, brand), ProductCard(size, forms, variants, m.exact, brand=brand))
         card.exact = card.exact or m.exact
         card.offers.append(o)
     want = request.size
@@ -161,8 +199,9 @@ class Memory:
         self.db.executemany("INSERT INTO picks (key, platform, offer_id, name, canonical, at, query) VALUES (?,?,?,?,?,?,?)",
                             [(key, p, offer_id(o), o.name, canonical, at, request.query)
                              for p, o in chosen.per_platform().items()])
-        passed = {w for c in shown if c is not chosen and c.exact for w in c.words} - chosen.words
-        self._words(chosen.words, "picked")
+        # Only pack and variant words teach "avoid": passing over a brand once is no reason to block it.
+        passed = {w for c in shown if c is not chosen and c.exact for w in c.attr_words} - chosen.attr_words
+        self._words(chosen.attr_words, "picked")
         self._words(passed, "rejected")
         self.db.commit()
 

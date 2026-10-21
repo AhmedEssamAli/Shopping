@@ -19,6 +19,9 @@ min_order = 0
 verified = false
 
 [seoudi]
+# Your delivery district in Seoudi's own area list (it decides the branch). Choosing an area on
+# the home page overrides this. North Lotas, Fifth Settlement -> HydePark branch (2026-10-21).
+area = "North Lotas"
 label = "Seoudi Market"
 status = "live"
 enabled = true

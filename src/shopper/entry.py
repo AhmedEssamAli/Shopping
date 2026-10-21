@@ -51,6 +51,7 @@ TYPES = [
 
 
 # Words that are a product line, not a product: "Nescafe classic" is the item, not "classic".
+_COUNT_WORDS = {"pcs", "pc", "piece", "pieces"}
 _GRADES = {"classic", "gold", "original", "light", "zero", "diet", "decaf"}
 
 
@@ -123,7 +124,10 @@ def read_entry(text: str, qty: int = 1, brands: list[str] | None = None) -> Entr
         size, pieces = size_text(found), (found.pack if found.unit != "pcs" else 1)
         if found.unit == "pcs":
             pieces, size = int(found.amount), ""
+        word = (_SINGLE.search(rest.replace("-", " ")) or [None, None, ""])[2] if found.unit == "pcs" else ""
         rest = _clean(_PACK.sub(" ", _SINGLE.sub(" ", _MULTI.sub(" ", rest))))
+        if word and word.lower() not in _COUNT_WORDS and word.lower() not in rest.lower():
+            rest = _clean(f"{rest} {word}")  # "30 eggs": the eggs are the item, 30 is the pack
     brand, left = _find((brands or []) + BRANDS, rest)
     rest = left or rest  # "Nescafe 200g": the brand is the item too
     kind, left = _find(TYPES, rest)

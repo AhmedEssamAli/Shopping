@@ -30,7 +30,7 @@ def talabat_shops(settings: Settings) -> dict[str, TalabatShopAdapter]:
 def build_adapters(settings: Settings, session: BrowserSession | None, book: PriceBook | None = None) -> dict[str, Adapter]:
     """Every platform in config/platforms.toml, live or not. ``book``: prices typed in from apps."""
     at = (settings.area_lat, settings.area_lon)
-    out: dict[str, Adapter] = {"gourmet": gourmet(), "seoudi": seoudi(at), "spinneys": spinneys(at),
+    out: dict[str, Adapter] = {"gourmet": gourmet(), "seoudi": seoudi(at, (settings.platforms.get("seoudi").options or {}).get("area", "") if settings.platforms.get("seoudi") else ""), "spinneys": spinneys(at),
                                "hyperone": hyperone(), "metro_markets": MetroAdapter(), **talabat_shops(settings)}
     if session is not None:
         out["amazon_eg"] = AmazonEgAdapter(session)

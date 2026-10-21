@@ -32,9 +32,9 @@ def offers():
 
 def test_pack_types_are_separate_products():
     cards = product_cards(COFFEE, offers())
-    exact = {c.label for c in cards if c.exact}
+    exact = {c.detail for c in cards if c.exact}
     assert exact == {"200g, sachet", "200g, pouch", "200g, jar"}
-    jar = next(c for c in cards if c.label == "200g, jar")
+    jar = next(c for c in cards if c.detail == "200g, jar")
     assert set(jar.per_platform()) == {"gourmet", "seoudi"}
 
 
@@ -48,7 +48,7 @@ async def test_pick_once_then_the_plan_uses_your_product(tmp_path):
     assert result.items[0].needs_pick and "Not final" in text
     assert result.best.assignments[0].offer.price == 261.99  # cheapest exact today: the pouch
 
-    jar = next(j for j, c in enumerate(result.items[0].cards) if c.label == "200g, jar")
+    jar = next(j for j, c in enumerate(result.items[0].cards) if c.detail == "200g, jar")
     assert app.feedback(rid, "pick", 0, card=result.items[0].cards[jar].key) == "ok"
     m = result.best.assignments[0]
     assert m.offer.name.startswith("Nestlé") and m.pinned and not result.items[0].needs_pick
@@ -64,7 +64,7 @@ async def test_passed_over_pack_words_become_avoided(tmp_path):
     app = core(tmp_path)
     mem: Memory = app.memory
     result, _, rid = await app.run([COFFEE])
-    app.feedback(rid, "pick", 0, card=next(c.key for c in result.items[0].cards if c.label == "200g, jar"))
+    app.feedback(rid, "pick", 0, card=next(c.key for c in result.items[0].cards if c.detail == "200g, jar"))
     assert "sachet" not in mem.avoid_words()  # once is not a habit
     tea = {"noon": [("Lipton Yellow Label Tea Sachet 100 bags", 120.0), ("Lipton Yellow Label Tea Box 100 bags", 130.0)]}
     app2 = core(tmp_path / "x", tea)
@@ -118,8 +118,8 @@ async def test_telegram_buttons_pick_and_choose_again(tmp_path):
     result, _, rid = await app.run([COFFEE])
     kb = pick_keyboard(app, result, rid, 0)
     labels = [row[0].text for row in kb.inline_keyboard]
-    assert labels[0].startswith("200g, pouch — 261.99 Amazon") and len(kb.inline_keyboard) == 3
-    jar = next(row[0] for row in kb.inline_keyboard if "jar" in row[0].text)
+    assert labels[0].startswith("Nescafe Classic Instant Coffee Pouch 200g — 261.99 Amazon") and len(kb.inline_keyboard) == 3
+    jar = next(row[0] for row in kb.inline_keyboard if "jar" in row[0].text.lower())
     assert parse_callback(jar.callback_data)[:3] == ("pick", rid, 0) and parse_callback("pk:x:y:z") is None
 
     handler = next(h for h in build_bot(app).handlers[0] if isinstance(h, CallbackQueryHandler))
@@ -128,7 +128,7 @@ async def test_telegram_buttons_pick_and_choose_again(tmp_path):
     update = SimpleNamespace(callback_query=query, effective_chat=SimpleNamespace(id=42),
                              effective_message=SimpleNamespace(reply_text=sent))
     await handler.callback(update, None)
-    assert "Chosen for Nescafe classic 200g: 200g, jar" in query.edit_message_text.call_args.args[0]
+    assert "Chosen for Nescafe classic 200g: Nestlé Nescafé Classic Instant Coffee Jar" in query.edit_message_text.call_args.args[0]
     assert "Updated plan" in sent.call_args.args[0] and "300.00" in sent.call_args.args[0]
     assert result.items[0].pinned
 
@@ -147,10 +147,10 @@ async def test_stale_pick_button_cannot_choose_another_product(tmp_path):
     sachet = next(c.key for c in result.items[0].cards if "sachet" in c.forms)
     jar = next(c.key for c in result.items[0].cards if "jar" in c.forms)
     assert app.feedback(rid, "pick", 0, card=jar) == "ok"
-    assert app.memory.recall(COFFEE).canonical.endswith("jar")
+    assert app.memory.recall(COFFEE).canonical.split()[-2:] == ["jar", "nescafe"]
     app.feedback(rid, "forget", 0)  # cards come back, sorted differently than the old message
     assert app.feedback(rid, "pick", 0, card=sachet) == "ok"  # an old button still means sachet
-    assert app.memory.recall(COFFEE).canonical.endswith("sachet")
+    assert app.memory.recall(COFFEE).canonical.split()[-2:] == ["nescafe", "sachet"]
     assert app.feedback(rid, "pick", 0, card="deadbeef") == "stale"
     assert sachet != jar
 
@@ -158,4 +158,4 @@ async def test_stale_pick_button_cannot_choose_another_product(tmp_path):
 def test_cards_split_rice_kinds():
     offers = [Offer("a", "Shahy Basmati Rice 5kg", 700, "u1"), Offer("b", "Al Doha Egyptian Rice 5kg", 220, "u2")]
     cards = product_cards(ItemRequest("rice 5kg"), offers)
-    assert {c.label for c in cards} == {"5kg, pack type not stated, basmati", "5kg, pack type not stated, egyptian"}
+    assert {c.detail for c in cards} == {"5kg, pack type not stated, basmati", "5kg, pack type not stated, egyptian"}

@@ -1,10 +1,12 @@
 """Render a CompareResult as chat text (Telegram/CLI) or as an HTML comparison table."""
 from __future__ import annotations
 
+import re
 from html import escape
 
 from .adapters import Adapter
 from .config import Settings
+from .entry import BRANDS, TYPES
 from .models import Proposal, now_utc
 from .learner import confidence_label
 from .memory import offer_key
@@ -238,7 +240,8 @@ img.mini{width:36px;height:36px;object-fit:contain;background:#fff;border-radius
 .bag li>span:first-child{min-width:0;overflow-wrap:anywhere}main a{overflow-wrap:anywhere}
 .choices{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:10px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x mandatory}
 .choice{scroll-snap-align:start;border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--card);display:flex;flex-direction:column;gap:6px}
-.choice ul{margin:0;padding-left:18px;font-size:13px}.choice .push{margin-top:auto}
+.choice ul.sold{list-style:none;margin:0;padding:0;font-size:13px}.choice ul.sold li{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-top:1px solid var(--line)}
+.choice h3{font-size:15px;line-height:1.3}.choice h3 a{text-decoration:none}.choice .push{margin-top:auto}
 details.choose{margin:10px 0 0}details.choose summary{cursor:pointer;font-size:14px;color:var(--muted)}
 form.inline{display:inline;margin:0}
 button{font:inherit;font-size:16px;font-weight:600;border:2px solid transparent;border-radius:12px;min-height:48px;padding:10px 26px;background:var(--primary);color:var(--on-primary);cursor:pointer;box-shadow:var(--lift);transition:transform .2s ease-out,box-shadow .2s ease-out,background-color .2s}
@@ -297,6 +300,12 @@ padding:8px 0;border-bottom:1px solid var(--line)}ul.list li:last-child{border-b
 background:var(--card);color:var(--ink);border:2px solid var(--line);box-shadow:var(--shadow);padding:10px 16px;text-align:left}
 .segment button small{font-weight:500;color:var(--muted);font-size:13px}.segment button:hover{background:var(--soft);color:var(--ink)}
 .segment button.on{border-color:var(--primary);background:var(--soft)}.segment button.on small{color:var(--primary)}
+/* a line's fields: tap to adjust and search again */
+details.adjust{margin:-2px 0 12px}details.adjust>summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+details.adjust>summary::-webkit-details-marker{display:none}details.adjust>summary .fields{margin:0}
+details.adjust .edit{font-size:13px;font-weight:600;color:var(--primary);text-decoration:underline;text-underline-offset:2px}
+details.adjust[open] .edit{color:var(--muted)}details.adjust form{margin-top:10px}.adjust .droprow{display:none}
+.notice.small{font-size:14px;margin:10px 0}
 /* order cards: one per shop, numbered */
 .orders{display:grid;gap:14px;margin-top:16px}@media (min-width:900px){.orders{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}}
 .order{border:1px solid var(--line);border-radius:16px;padding:16px 18px;background:var(--card)}
@@ -453,27 +462,96 @@ def _one_shop_html(result: CompareResult, settings: Settings) -> str:
 
 
 def _cards_html(result: CompareResult, settings: Settings, i: int, base: str | None, q: str) -> str:
+    """One card per product: its photo, name, size and pack, and the shops that sell that same product."""
     r = result.items[i]
     cards = []
-    for j, c in enumerate(r.cards):
+    for c in r.cards:
         best = c.cheapest()
-        listings = "".join(f"<li>{escape(label(settings, p))}: {_link(o)}, {o.price:,.2f}</li>" for p, o in c.per_platform().items())
-        tag = "" if c.exact else "<span class='warn small'>other size or wording</span>"
+        shops = c.per_platform()
+        listings = "".join(f"<li><span>{escape(label(settings, p))}</span><span class=num>{o.price:,.2f}</span></li>"
+                           for p, o in shops.items())
+        tag = "" if c.exact else "<span class='flag close'>other size or wording</span>"
         pic = next((o for o in c.offers if getattr(o, "image", "")), None)
-        cards.append(f"<div class=choice>{_img(pic) if pic else ''}<h3>{escape(c.label)}</h3>{tag}<div>{_tag(best.price)} <span class='muted small'>{_unit(best)}</span></div>"
-                     f"<ul>{listings}</ul><div class=push>{_button(base and base + '/pick', q, 'This one', {'item': i, 'card': c.key}, 'pick')}</div></div>")
+        cards.append(f"<div class=choice>{_img(pic) if pic else ''}<h3>{_link(best)}</h3>"
+                     f"<p class='muted small'>{escape(c.detail)}</p>{tag}"
+                     f"<div>{_tag(best.price)} <span class='muted small'>{_unit(best)}</span></div>"
+                     f"<p class='small muted' style='margin:4px 0 0'>Sold at {len(shops)} shop{'s' if len(shops) != 1 else ''}</p>"
+                     f"<ul class=sold>{listings}</ul><div class=push>{_button(base and base + '/pick', q, 'This one', {'item': i, 'card': c.key}, 'pick')}</div></div>")
     return f"<div class=choices>{''.join(cards)}</div>"
+
+
+UNITS = ("", "L", "ml", "kg", "g")
+_SIZE = re.compile(r"^(\d+(?:[.,]\d+)?)\s*(ml|l|kg|g)$", re.I)
+
+
+def item_row(e=None) -> str:
+    """One row of the item form, empty or filled from an Entry (the review step)."""
+    v = lambda x: f" value='{escape(str(x))}'" if x else ""  # noqa: E731
+    amount, unit = "", ""
+    if e is not None and e.size:
+        m = _SIZE.match(e.size)
+        if m:
+            amount, unit = m.group(1), "L" if m.group(2).lower() == "l" else m.group(2).lower()
+    units = "".join(f"<option{' selected' if u == unit else ''}>{u}</option>" for u in UNITS)
+    pieces = e.pieces if e is not None and e.pieces > 1 else ""
+    return ("<div class=itemrow>"
+            f"<label><span>Item <b>*</b></span><input name=item list=past placeholder='milk' autocomplete=off{v(e and e.item)}></label>"
+            f"<label>Brand<input name=brand list=brands placeholder='any brand' autocomplete=off{v(e and e.brand)}></label>"
+            f"<label>Type<input name=kind list=types placeholder='any type' autocomplete=off{v(e and e.type)}></label>"
+            f"<label>Size of one<span class=sizebox><input name=amount inputmode=decimal placeholder='1'{v(amount)}>"
+            f"<select name=unit aria-label=Unit>{units}</select></span></label>"
+            f"<label>Pieces in pack<input name=pieces inputmode=numeric placeholder='1'{v(pieces)}></label>"
+            "<label>How many<span class=stepper><button type=button class=dec aria-label='One less'>−</button>"
+            f"<input name=qty inputmode=numeric placeholder='1' aria-label='How many'{v(e and e.qty)}>"
+            "<button type=button class=inc aria-label='One more'>+</button></span></label>"
+            "<p class=preview></p><button type=button class='link droprow' aria-label='Remove this item'>Remove</button></div>")
+
+
+ROW_LISTS = ("<datalist id=brands>" + "".join(f"<option value='{escape(b)}'>" for b in BRANDS) + "</datalist>"
+             "<datalist id=types>" + "".join(f"<option value='{escape(x)}'>" for x in TYPES) + "</datalist>")
+
+
+def _chips(query: str, tag: str = "p") -> str:
+    from .entry import read_entry
+    e = read_entry(query)
+    parts = [("Item", e.item), ("Brand", e.brand or "any"), ("Type", e.type or "any"), ("Size", e.size or "any"),
+             ("Pack", f"{e.pieces} pieces" if e.pieces > 1 else "single")]
+    return f"<{tag} class=fields>" + "".join(
+        f"<span class='{'open' if v in ('any', 'single') else ''}'><i>{k}</i> {escape(v)}</span>" for k, v in parts) + f"</{tag}>"
 
 
 def fields_html(query: str) -> str:
     """What shopper understood from the line, field by field; an open field reads "any"."""
-    from .entry import read_entry
-    e = read_entry(query)
-    parts = [("Item", e.item), ("Brand", e.brand or "any"), ("Type", e.type or "any"), ("Size", e.size or "any")]
-    if e.pieces > 1:
-        parts.append(("Pack", f"{e.pieces} pieces"))
-    return "<p class=fields>" + "".join(
-        f"<span class='{'open' if v == 'any' else ''}'><i>{k}</i> {escape(v)}</span>" for k, v in parts) + "</p>"
+    return _chips(query)
+
+
+# Rows outside the home form (a line's "Adjust search"): the "Searches for" preview and − / +.
+ROW_SCRIPT = ("<script>(()=>{const prev=r=>{const v=n=>((r.querySelector(`[name=${n}]`)||{}).value||'').trim();"
+              "const item=v('item'),low=item.toLowerCase(),size=v('amount')&&v('unit')?v('amount')+v('unit'):'',"
+              "n=parseInt(v('pieces'))||1,qty=parseInt(v('qty'))||1;"
+              "const w=[v('brand')&&!low.includes(v('brand').toLowerCase())?v('brand'):'',"
+              "v('kind')&&!low.includes(v('kind').toLowerCase())?v('kind'):'',item,n>1?(size?n+'x'+size:n+' pcs'):size];"
+              "const p=r.querySelector('.preview');if(!p)return;p.textContent='';if(item){p.append('Searches for: ');"
+              "const b=document.createElement('b');b.textContent=qty+' × '+w.filter(Boolean).join(' ');p.append(b)}};"
+              "document.querySelectorAll('.adjust .itemrow').forEach(prev);"
+              "document.addEventListener('input',e=>{const r=e.target.closest('.adjust .itemrow');if(r)prev(r)});"
+              "document.addEventListener('click',e=>{const b=e.target.closest('.adjust .inc,.adjust .dec');if(!b)return;"
+              "const i=b.parentElement.querySelector('input'),n=(parseInt(i.value)||1)+(b.classList.contains('inc')?1:-1);"
+              "i.value=Math.max(1,n);prev(b.closest('.itemrow'))})})()</script>")
+
+
+def adjust_html(r, i: int, base: str | None, q: str, missing: bool) -> str:
+    """The line's fields as chips; tap them to change any field and search this item again."""
+    if not base:
+        return fields_html(r.request.query) + ("<p class=muted>No shop had this item.</p>" if missing else "")
+    from .entry import entry_of
+    hint = ("<p class='notice small'><b>No shop had this item.</b> Check how it was read, change a field "
+            "(a shorter item name or no size often helps), and search again.</p>") if missing else ""
+    return (f"<details class=adjust{' open' if missing else ''}><summary>{_chips(r.request.query, 'span')}"
+            f"<span class=edit>Adjust search</span></summary>{hint}"
+            f"<form method=post action='{escape(base)}/research{q}'><input type=hidden name=index value={i}>"
+            f"<input type=hidden name=line value='{escape(r.request.query)}'>{item_row(entry_of(r.request))}"
+            f"<div class=actions><button>Search again for this item</button></div></form></details>")
 
 
 def _line_html(result: CompareResult, settings: Settings, i: int, base: str | None, q: str) -> str:
@@ -507,7 +585,7 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
         conf = f" <span class='conf {confidence_label(r.confidence)}'>match {confidence_label(r.confidence)}</span>" if r.confidence is not None else ""
         state = (f"<span class=ask>{conf} Right product? {_button(base + '/confirm', q, 'Yes', f, 'yes')}"
                  f"{_button(base + '/deny', q, 'No', f, 'no')}</span>")
-    body = f"<ul class=labels>{''.join(labels)}</ul>" if labels else "<p class=muted>No shop had this item.</p>"
+    body = f"<ul class=labels>{''.join(labels)}</ul>" if labels else ""
     miss = f"<p class='missing muted'>Not found at {escape(', '.join(missing))}</p>" if labels and missing else ""
     choose = ""
     if r.cards and not r.pinned:
@@ -518,7 +596,7 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
     qty = stepper(base and base + "/qty", q, r.request.qty, key, r.request.query)
     drop = _button(base and base + "/remove", q, "Remove line", key) if len(result.items) > 1 else ""
     return (f"<section class=line id=line-{i}><header>{qty}<h3>{escape(r.request.query)}</h3>{state}{drop}</header>"
-            f"{fields_html(r.request.query)}{body}{miss}{choose}</section>")
+            f"{adjust_html(r, i, base, q, not labels)}{body}{miss}{choose}</section>")
 
 
 def branch_note(a) -> str:
@@ -608,10 +686,10 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     body = (f"{_orders_html(result, settings, options, base, q)}<div class='panel plan'>{plan}</div>{undo_html}{refresh}{notice}"
             f"{_one_shop_html(result, settings)}{tips_html}"
             f"<h2>{'Choose your products and compare' if pending else 'Every price, item by item'}</h2>{lines}{notes_html}{bar}")
-    script = ("<script>document.querySelectorAll('button.copy').forEach(b=>b.addEventListener('click',async()=>{"
+    script = (ROW_SCRIPT + "<script>document.querySelectorAll('button.copy').forEach(b=>b.addEventListener('click',async()=>{"
               "try{await navigator.clipboard.writeText(b.dataset.text);b.textContent='Copied. Opening the shop…'}"
               "catch(e){prompt('Copy this list',b.dataset.text)}if(b.dataset.url)window.open(b.dataset.url,'_blank','noopener')}))</script>")
-    return page("Basket comparison", body + script, header)
+    return page("Basket comparison", body + ROW_LISTS + script, header)
 
 
 def debug_text(result: CompareResult, settings: Settings, top: int = 3) -> str:
