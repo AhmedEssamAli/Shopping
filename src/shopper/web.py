@@ -250,7 +250,7 @@ def create_app(core: App) -> FastAPI:
             f"<li><span><b>{escape(nm)}</b> <span class='muted small'>{k} line{'s' if k != 1 else ''}</span></span>"
             f"<span class=rowactions>"
             + "".join(f"<form method=post action='/lists/{act}{q(t)}' class=inline><input type=hidden name=name value='{escape(nm)}'>"
-                      f"<button class={cls}>{txt}</button></form>"
+                      f"<button class='{cls}'>{txt}</button></form>"
                       for act, txt, cls in (("review", "Review and compare", "small"), ("use", "Make it my list", "quiet small"),
                                             ("delete", "Delete", "link")))
             + "</span></li>" for nm, k in named) + "</ul></div>") if named else "")
