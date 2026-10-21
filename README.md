@@ -70,6 +70,11 @@ An item has six fields. Only the item is required. Every field you fill must mat
 | Pieces in pack | pieces in one pack | 6 (a 6-pack), 30 (eggs) |
 | How many | packs to buy; empty = 1 | 2 |
 
+**How a typed line is split** (also on the home page, under "How shopper reads a typed line"):
+
+- **Exact way:** `item | brand | type | size | pieces | how many`, for example `milk | Juhayna | skimmed | 1L | 6 | 2`. Read by position; nothing is guessed; an empty field stays open.
+- **Free way**, in this order: how many (a number at the start or end that is not a size: `2 milk`, `milk x2`); size (`1L`, `200 ml`, `5 kg`); pieces (`6x1L`, `pack of 6`, `30 pcs`, `30 eggs`); brand (a known brand); type (a known type word); item (everything left). With `ANTHROPIC_API_KEY`, Claude fills the same fields for Arabic and free text.
+
 Typed and pasted lines use the same order: how many, brand, type, item, pieces x size. `2 Juhayna skimmed milk 6x1L` is two six-packs of 1 L Juhayna skimmed milk. The home page has one row of fields per item with a live "Searches for" line; Telegram's **Add an item** asks the fields one by one, with buttons for brands, types and sizes seen in shops before. Result pages, the list and the bot show how each line was read.
 
 ## The home page
@@ -101,6 +106,10 @@ In the app you paste a list, see the comparison, and press **Add the best plan t
 
 - **1 shop / Up to 2 shops / Up to 3 shops** above the plan, each with its best total. Tap one to re-plan.
 - The best plan is a set of numbered **order cards**, largest first: each shop's lines, subtotal, fees and one action, **Add N items to cart** (noon, Amazon) or **Copy list and open the shop**, then **Done: order placed**. The plan shows "1 of 2 orders placed".
+- **Filters** above the plan: shops (supermarkets, quick delivery, marketplaces, app shops), brands found, exact matches only. Applying re-plans without a search.
+- Each line shows its fields as chips; tap them (**Adjust search**) to change item, brand, type, size or pack and **Search again for this item**: only that line is searched again. A line no shop had opens this form.
+- **Which one do you mean?** shows one product per card (one brand, size, pack and variant) with the shops that sell it.
+- **If you buy everything in one shop** is a table: total with fees, items found and exact, fees, difference from the plan, missing items, and **Use only this shop**. Notes fold into one line.
 - Each line has − / + and **Remove line** (with Undo). A change re-plans from the prices already fetched, in milliseconds, without searching the shops again. **Refresh prices** appears after 30 minutes.
 - `shopper stats` reads the measures from your own use: time to check a list, quantity changes, split plans fully ordered.
 
@@ -133,6 +142,10 @@ shopper platforms
 ## Start automatically on Windows
 
 Run `scripts\windows\install-autostart.cmd` once. Also put a shortcut to `scripts\windows\start-shopping-chrome.cmd` in your Startup folder (`shell:startup`) so Shopping Chrome opens at logon. It creates a scheduled task that starts `shopper serve` at every logon and logs to `%USERPROFILE%\.shopper\serve.log`. Start it now with `schtasks /Run /TN "shopper"`. Remove it with `schtasks /Delete /TN "shopper" /F`.
+
+## Instashop shops
+
+Instashop, like talabat, has many shops. Run `shopper instashop-shops` with Shopping Chrome open and your address set on Instashop: it prints one config line per shop it shows you. Paste the ones you use into `[instashop] shops` in `config/platforms.toml`. Each is searched in Shopping Chrome, so keep it to a few. If a search fails, the error says so and saves the page.
 
 ## talabat shops
 
@@ -189,7 +202,7 @@ src/shopper/
   report.py        Telegram text and HTML table
   watcher.py       price watches and alerts
   bot.py · web.py · pwa.py (phone app) · cli.py · store.py (SQLite price history)
-tests/             169 tests; Magento fixtures are real responses captured 2026-10-18
+tests/             172 tests; Magento fixtures are real responses captured 2026-10-18
 ```
 
 Run the tests with `pip install -e ".[dev]" && pytest`.
