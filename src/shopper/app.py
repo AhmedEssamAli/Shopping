@@ -14,7 +14,7 @@ from .config import Settings, load_settings
 from .models import ItemRequest
 from .parsing import parse_list
 from .report import to_chat, to_html, to_text
-from .service import CompareResult, all_offers, assemble, compare
+from .service import CompareResult, all_offers, assemble, compare, plan_options
 from .store import Store
 
 
@@ -35,6 +35,7 @@ class App:
         self.last_rid: dict[int, str] = {}  # per Telegram chat, for /push
         self.results: dict[str, CompareResult] = {}
         self.push_log: dict[str, list[str]] = {}  # result id -> what its cart push reported, from bot or web
+        self.removed: dict[str, tuple[int, object]] = {}  # result id -> last line removed there, for Undo
         for name, a in self.adapters.items():  # the delivery area you chose on the home page
             saved = self.store.pref(f"area:{name}")
             if saved and hasattr(a, "use_area"):
@@ -90,11 +91,53 @@ class App:
     def _render(self, rid: str) -> None:
         result = self.results[rid]
         html = to_html(result, self.settings, self.adapters, base=f"/r/{rid}",
-                       token=self.settings.web_token, learned={**self.memory.learned(), "answers": self.learner.answers})
+                       token=self.settings.web_token, learned={**self.memory.learned(), "answers": self.learner.answers},
+                       options=plan_options(result, self.settings, self.adapters), undo=rid in self.removed)
         n = len(result.items)
         lines = ", ".join(r.request.query for r in result.items[:3]) + ("…" if n > 3 else "")
         total = f"EGP {result.best.total:,.2f}" if result.best else "no plan"
         self.store.update_result(rid, html, f"{n} item{'s' if n != 1 else ''}: {lines} — {total}")
+
+    # Change a comparison in place: quantities, lines, order limit. Re-plans from the offers
+    # already fetched, so it takes milliseconds and searches no shop.
+    def edit_line(self, rid: str, item: int, expect: str | None, qty: int | None = None, remove: bool = False) -> str:
+        """Set a line's quantity, or remove it. ``expect`` is the line's text, so a stale page
+        cannot change another line. Returns "ok", "stale" or "gone"."""
+        result = self.results.get(rid)
+        if result is None:
+            return "gone"
+        if not 0 <= item < len(result.items) or (expect is not None and result.items[item].request.query != expect):
+            return "stale"
+        if remove or (qty is not None and qty < 1):
+            if len(result.items) == 1:
+                return "stale"  # a comparison keeps at least one line
+            self.removed[rid] = (item, result.items.pop(item))
+        elif qty is not None:
+            r = result.items[item]
+            r.request = ItemRequest(r.request.query, min(qty, 999))
+        self._replan(rid)
+        return "ok"
+
+    def undo_remove(self, rid: str) -> bool:
+        result, last = self.results.get(rid), self.removed.pop(rid, None)
+        if result is None or last is None:
+            return False
+        i, line = last
+        result.items.insert(min(i, len(result.items)), line)
+        self._replan(rid)
+        return True
+
+    def set_orders(self, rid: str, limit: int) -> bool:
+        result = self.results.get(rid)
+        if result is None or not 1 <= limit <= 4:
+            return False
+        result.max_orders = limit
+        self._replan(rid)
+        return True
+
+    def _replan(self, rid: str) -> None:
+        assemble(self.results[rid], self.settings, self.adapters, learner=self.learner)
+        self._render(rid)
 
     # The household list, shared by Telegram and the web page.
     def list_items(self) -> list[ItemRequest]:
@@ -116,6 +159,17 @@ class App:
 
     def clear_list(self) -> None:
         self.store.clear_list(HOUSEHOLD)
+
+    def set_list_qty(self, index: int, qty: int, expect: str | None = None) -> bool:
+        """Change a list line's quantity; below 1 removes the line."""
+        items = self.list_items()
+        if not 0 <= index < len(items) or (expect is not None and items[index].query != expect):
+            return False
+        if qty < 1:
+            return self.store.remove_from_list(HOUSEHOLD, index)
+        items[index] = ItemRequest(items[index].query, min(qty, 999))
+        self.save_list(items)
+        return True
 
     def feedback(self, rid: str, action: str, item: int, card: str | None = None, platform: str | None = None,
                  offer: str | None = None) -> str:

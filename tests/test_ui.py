@@ -46,10 +46,26 @@ async def test_result_buttons(tmp_path):
     assert rows[0].callback_data == f"push:{rid}" and rows[-1].url.startswith("https://pc.tail.ts.net/r/")
 
 
+async def test_list_quantity_buttons_in_telegram(tmp_path):
+    app = core(tmp_path)
+    app.add_to_list([ItemRequest("rice 5kg", 2)])
+    button, _ = handlers(app)
+    kb = list_keyboard(app.list_items()).inline_keyboard
+    update, _ = fake_update(data=kb[0][1].callback_data)
+    await button.callback(update, None)
+    assert app.list_items()[0].qty == 3 and update.callback_query.answer.call_args.args[0] == "3 × rice 5kg"
+    for _ in range(3):
+        update, _ = fake_update(data=kb[0][0].callback_data)
+        await button.callback(update, None)
+    assert app.list_items() == []
+
+
 def test_list_keyboard_rows():
     kb = list_keyboard([ItemRequest(f"item {i}") for i in range(6)]).inline_keyboard
-    assert [b.text for b in kb[0]] == ["Remove 1", "Remove 2", "Remove 3", "Remove 4"]
-    assert kb[0][0].callback_data.startswith("rm:0:")
+    assert [b.text for b in kb[0]] == ["1  −", "1  +", "Remove 1"] and len(kb) == 7
+    assert kb[0][0].callback_data.startswith("lq:0:") and kb[0][0].callback_data.endswith(":-1")
+    assert kb[0][2].callback_data.startswith("rm:0:")
+    assert all(len(b.callback_data.encode()) <= 64 for row in kb for b in row)
     assert [b.callback_data for b in kb[-1]] == ["cmp", "clr"] and list_keyboard([]).inline_keyboard == ()
 
 

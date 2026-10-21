@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from . import pwa
 from .app import App
 from .entry import BRANDS, TYPES, compose
-from .report import fields_html, page, steps_html
+from .report import fields_html, page, stepper, steps_html
 
 
 def _local(iso: str) -> str:
@@ -154,7 +154,9 @@ def create_app(core: App) -> FastAPI:
                f"<label>Size of one<span class=sizebox><input name=amount inputmode=decimal placeholder='1'>"
                f"<select name=unit aria-label=Unit>{units}</select></span></label>"
                "<label>Pieces in pack<input name=pieces inputmode=numeric placeholder='1'></label>"
-               "<label>How many<input name=qty inputmode=numeric placeholder='1'></label>"
+               "<label>How many<span class=stepper><button type=button class=dec aria-label='One less'>−</button>"
+               "<input name=qty inputmode=numeric placeholder='1' aria-label='How many'>"
+               "<button type=button class=inc aria-label='One more'>+</button></span></label>"
                "<p class=preview></p></div>")
         lists = ("<datalist id=brands>" + "".join(f"<option value='{escape(b)}'>" for b in BRANDS) + "</datalist>"
                  "<datalist id=types>" + "".join(f"<option value='{escape(x)}'>" for x in TYPES) + "</datalist>")
@@ -186,7 +188,8 @@ def create_app(core: App) -> FastAPI:
                 f"<button class=quiet formaction='/list/add{q(t)}'>Add to the list</button></div></form>")
         items = core.list_items()
         if items:
-            rows = "".join(f"<li><span><b class=qty>{it.qty}×</b> {escape(it.query)}{fields_html(it.query)}</span>"
+            rows = "".join(f"<li id=list-{i}><span class=listline>{stepper(f'/list/qty', q(t), it.qty, {'index': i, 'line': it.query}, it.query)}"
+                           f"<span>{escape(it.query)}{fields_html(it.query)}</span></span>"
                            f"<form method=post action='/list/remove{q(t)}' class=inline><input type=hidden name=index value={i}>"
                            f"<input type=hidden name=line value='{escape(it.query)}'>"
                            f"<button class=link>Remove</button></form></li>" for i, it in enumerate(items))
@@ -210,6 +213,9 @@ def create_app(core: App) -> FastAPI:
                   "const p=r.querySelector('.preview');p.textContent='';if(item){p.append('Searches for: ');"
                   "const b=document.createElement('b');b.textContent=qty+' × '+w.filter(Boolean).join(' ');p.append(b)}};"
                   "document.getElementById('rows').addEventListener('input',e=>{const r=e.target.closest('.itemrow');if(r)prev(r)});"
+                  "document.getElementById('rows').addEventListener('click',e=>{const b=e.target.closest('.inc,.dec');if(!b)return;"
+                  "const i=b.parentElement.querySelector('input'),n=(parseInt(i.value)||1)+(b.classList.contains('inc')?1:-1);"
+                  "i.value=Math.max(1,n);prev(b.closest('.itemrow'))});"
                   "document.getElementById('addrow').addEventListener('click',()=>{const r=document.querySelector('.itemrow')"
                   ".cloneNode(true);r.querySelectorAll('input,select').forEach(i=>i.value='');r.querySelector('.preview').textContent='';"
                   "document.getElementById('rows').append(r);r.querySelector('input').focus()});"
@@ -288,7 +294,7 @@ def create_app(core: App) -> FastAPI:
     async def household_list(action: str, items: str = Form(""), index: int = Form(-1), line: str | None = Form(None),
                              item: list[str] = Form([]), brand: list[str] = Form([]), kind: list[str] = Form([]),
                              amount: list[str] = Form([]), unit: list[str] = Form([]), pieces: list[str] = Form([]),
-                             qty: list[str] = Form([]), t: str | None = Query(None)):
+                             qty: list[str] = Form([]), delta: str = Form("0"), t: str | None = Query(None)):
         check(t)
         if action == "add":
             core.add_to_list(await requests_from(items, _rows(item, brand, kind, amount, unit, pieces, qty)))
@@ -296,6 +302,12 @@ def create_app(core: App) -> FastAPI:
             core.remove_from_list(index, line)  # with the line text, a stale tab cannot remove another line
         elif action == "clear":
             core.clear_list()
+        elif action == "qty":
+            try:
+                n = int(qty[0] if qty else "0") + int(delta or 0)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="The quantity must be a whole number.") from None
+            core.set_list_qty(index, n, line)
         elif action == "compare":
             requests = core.list_items()
             if requests:
@@ -303,7 +315,7 @@ def create_app(core: App) -> FastAPI:
                 return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
         else:
             raise HTTPException(status_code=404)
-        return RedirectResponse(f"/{q(t)}", status_code=303)
+        return RedirectResponse(f"/{q(t)}#list-{index}" if action == "qty" else f"/{q(t)}", status_code=303)
 
     @api.get("/r/{rid}", response_class=HTMLResponse)
     async def result(rid: str, t: str | None = Query(None)):
@@ -345,6 +357,55 @@ def create_app(core: App) -> FastAPI:
         body = (f"<div class='panel plan'><ul>{''.join(f'<li>{escape(x)}</li>' for x in lines)}</ul>"
                 f"<p><a href='/r/{escape(rid)}{q(t)}'>Back to the comparison</a></p><p><a href='/{q(t)}'>Compare a new list</a></p></div>")
         return pwa.add_head(page("Cart push", body, "<h1>Cart push</h1><p>What went into your carts. Check each cart before you pay.</p>"), t)
+
+    def gone(status: str) -> None:
+        if status == "gone":
+            raise HTTPException(status_code=410, detail="This comparison is no longer open, because shopper "
+                                "restarted since. Compare the list again to change it.")
+
+    def new_qty(qty: str, delta: str) -> int:
+        try:
+            return int(qty.strip() or 0) + int(delta or 0)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="The quantity must be a whole number.") from None
+
+    @api.post("/r/{rid}/qty")
+    async def line_qty(rid: str, item: int = Form(...), line: str = Form(""), qty: str = Form("1"), delta: str = Form("0"),
+                       t: str | None = Query(None)):
+        check(t)
+        status = core.edit_line(rid, item, line or None, qty=new_qty(qty, delta))
+        gone(status)
+        return RedirectResponse(f"/r/{rid}{q(t)}#line-{item}", status_code=303)
+
+    @api.post("/r/{rid}/remove")
+    async def line_remove(rid: str, item: int = Form(...), line: str = Form(""), t: str | None = Query(None)):
+        check(t)
+        gone(core.edit_line(rid, item, line or None, remove=True))
+        return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
+
+    @api.post("/r/{rid}/undo")
+    async def line_undo(rid: str, t: str | None = Query(None)):
+        check(t)
+        core.undo_remove(rid)
+        return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)
+
+    @api.post("/r/{rid}/orders")
+    async def orders_limit(rid: str, limit: int = Form(...), t: str | None = Query(None)):
+        check(t)
+        if rid not in core.results:
+            gone("gone")
+        core.set_orders(rid, limit)
+        return RedirectResponse(f"/r/{rid}{q(t)}#plan", status_code=303)
+
+    @api.post("/r/{rid}/refresh")
+    async def refresh(rid: str, t: str | None = Query(None)):
+        check(t)
+        result = core.results.get(rid)
+        if result is None:
+            gone("gone")
+        _, _, new = await run_or_explain([r.request for r in result.items], max_orders=result.max_orders,
+                                         exact_only=result.exact_only)
+        return RedirectResponse(f"/r/{new}{q(t)}", status_code=303)
 
     @api.post("/r/{rid}/{action}")
     async def feedback(rid: str, action: str, item: int = Form(...), card: str | None = Form(None),

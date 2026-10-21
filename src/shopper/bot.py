@@ -133,10 +133,13 @@ def check_keyboard(result: CompareResult, rid: str) -> InlineKeyboardMarkup | No
 
 
 def list_keyboard(items) -> InlineKeyboardMarkup:
-    n = len(items)
-    rows = [[InlineKeyboardButton(f"Remove {i + 1}", callback_data=f"rm:{i}:{line_tag(items[i].query)}")
-             for i in range(k, min(k + 4, n, LIST_BUTTONS))] for k in range(0, min(n, LIST_BUTTONS), 4)]
-    if n:
+    """One row per line: "2 −", "2 +", "Remove 2" (keyed by the line's text), then Compare and Clear."""
+    n = min(len(items), LIST_BUTTONS)
+    rows = [[InlineKeyboardButton(f"{i + 1}  −", callback_data=f"lq:{i}:{line_tag(items[i].query)}:-1"),
+             InlineKeyboardButton(f"{i + 1}  +", callback_data=f"lq:{i}:{line_tag(items[i].query)}:1"),
+             InlineKeyboardButton(f"Remove {i + 1}", callback_data=f"rm:{i}:{line_tag(items[i].query)}")]
+            for i in range(n)]
+    if items:
         rows.append([InlineKeyboardButton("Compare the list", callback_data="cmp"),
                      InlineKeyboardButton("Clear the list", callback_data="clr")])
     return InlineKeyboardMarkup(rows)
@@ -389,6 +392,17 @@ def build_bot(core: App) -> Application:
             i = int(index) if index.isdigit() else -1
             removed = 0 <= i < len(items) and line_tag(items[i].query) == tag and core.remove_from_list(i, items[i].query)
             await query.answer("Removed" if removed else "The list changed; nothing was removed")
+            await show_list(update, edit=True)
+        elif kind == "lq":
+            index, tag, step = (rest.split(":") + ["", "", ""])[:3]
+            items = core.list_items()
+            i = int(index) if index.isdigit() else -1
+            ok_line = 0 <= i < len(items) and line_tag(items[i].query) == tag and step in ("1", "-1")
+            new = items[i].qty + int(step) if ok_line else 0
+            if ok_line and core.set_list_qty(i, new, items[i].query):
+                await query.answer("Removed" if new < 1 else f"{new} × {items[i].query}")
+            else:
+                await query.answer("The list changed; nothing was changed")
             await show_list(update, edit=True)
         elif kind == "cmp":
             await query.answer()

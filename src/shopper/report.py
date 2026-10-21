@@ -5,7 +5,7 @@ from html import escape
 
 from .adapters import Adapter
 from .config import Settings
-from .models import Proposal
+from .models import Proposal, now_utc
 from .learner import confidence_label
 from .memory import offer_key
 from .service import CompareResult
@@ -280,6 +280,22 @@ ul.list{list-style:none;margin:0;padding:0}ul.list li{display:flex;justify-conte
 padding:8px 0;border-bottom:1px solid var(--line)}ul.list li:last-child{border-bottom:0}
 @media (max-width:520px){.top h1{font-size:24px}.tag.big{font-size:34px}.shops li{grid-template-columns:1fr auto}.shops .bar{grid-column:1/-1;order:3}}
 @media (prefers-reduced-motion:no-preference){.label.best{animation:pop .5s ease-out 1}@keyframes pop{from{transform:scale(.96)}to{transform:none}}}
+/* quantity stepper: − n + */
+.stepper{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
+.stepper button{min-height:40px;min-width:44px;padding:0;border:0;border-radius:0;box-shadow:none;background:transparent;color:var(--primary);font-size:22px;line-height:1}
+.stepper button:hover{background:var(--soft);transform:none;box-shadow:none;color:var(--primary)}
+.stepper input{width:3.2em;min-height:40px;border:0;border-inline:1px solid var(--line);text-align:center;font:600 16px var(--num);background:transparent;color:var(--ink)}
+.stepper+.qty{display:none}
+.itemrow .stepper{display:grid;grid-template-columns:44px 1fr 44px;width:100%}
+.itemrow .stepper input{border:0;border-inline:1px solid var(--line);border-radius:0;min-height:42px;padding:0;outline:0}
+.listline{display:flex;gap:14px;align-items:flex-start;min-width:0}.listline>span{min-width:0;overflow-wrap:anywhere;padding-top:8px}
+.line>header .link{margin-left:auto}
+/* order limit: 1 shop / up to 2 / up to 3 */
+.segment{display:flex;flex-wrap:wrap;gap:8px;margin:-8px 0 28px;position:relative;z-index:1}
+.segment form{flex:1 1 150px}.segment button{width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:2px;
+background:var(--card);color:var(--ink);border:2px solid var(--line);box-shadow:var(--shadow);padding:10px 16px;text-align:left}
+.segment button small{font-weight:500;color:var(--muted);font-size:13px}.segment button:hover{background:var(--soft);color:var(--ink)}
+.segment button.on{border-color:var(--primary);background:var(--soft)}.segment button.on small{color:var(--primary)}
 /* step bar: where you are in add, review, compare, order */
 .steps{display:flex;flex-wrap:wrap;gap:6px 18px;list-style:none;margin:18px 0 0;padding:0;font-size:14px;color:var(--muted)}
 .steps li{display:flex;align-items:center;gap:8px}.steps b{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:999px;
@@ -440,7 +456,10 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
         cards = _cards_html(result, settings, i, base, q)
         choose = (f"<div id=pick-{i}><h3 class=small style='margin:16px 0 8px'>Which one do you mean?</h3>{cards}</div>"
                   if r.needs_pick else f"<details class=choose id=pick-{i}><summary>Wrong product? Choose</summary>{cards}</details>")
-    return (f"<section class=line><header><span class=qty>{r.request.qty}×</span><h3>{escape(r.request.query)}</h3>{state}</header>"
+    key = {"item": i, "line": r.request.query}
+    qty = stepper(base and base + "/qty", q, r.request.qty, key, r.request.query)
+    drop = _button(base and base + "/remove", q, "Remove line", key) if len(result.items) > 1 else ""
+    return (f"<section class=line id=line-{i}><header>{qty}<h3>{escape(r.request.query)}</h3>{state}{drop}</header>"
             f"{fields_html(r.request.query)}{body}{miss}{choose}</section>")
 
 
@@ -458,9 +477,38 @@ def branch_note(a) -> str:
     return ""
 
 
+def stepper(action: str | None, q: str, qty: int, fields: dict, label_text: str) -> str:
+    """− qty + as one small form. Without ``action`` (a page from history) only the number shows."""
+    if not action:
+        return f"<span class=qty>{qty}×</span>"
+    hidden = "".join(f"<input type=hidden name={k} value='{escape(str(v))}'>" for k, v in fields.items())
+    return (f"<form method=post action='{escape(action)}{q}' class=stepper>{hidden}"
+            f"<button name=delta value=-1 aria-label='One less {escape(label_text)}'>−</button>"
+            f"<input name=qty value={qty} inputmode=numeric aria-label='How many {escape(label_text)}' "
+            f"onchange='this.form.submit()'><button name=delta value=1 aria-label='One more {escape(label_text)}'>+</button>"
+            f"</form><span class=qty>{qty}×</span>")
+
+
+def _orders_html(result: CompareResult, settings: Settings, options: dict | None, base: str | None, q: str) -> str:
+    """1 shop · up to 2 · up to 3, each with its best total; the current limit is pressed."""
+    if not options or not base:
+        return ""
+    now = result.max_orders or settings.max_orders
+    parts = []
+    for k, prop in options.items():
+        name = "1 shop" if k == 1 else f"Up to {k} shops"
+        total = _egp(prop.total) if prop else "no plan"
+        miss = f", {len(prop.missing)} missing" if prop and prop.missing else ""
+        on = " aria-pressed=true class=on" if k == now else " aria-pressed=false"
+        parts.append(f"<form method=post action='{escape(base)}/orders{q}' class=inline><input type=hidden name=limit value={k}>"
+                     f"<button{on}><span>{name}</span><small>{escape(total + miss)}</small></button></form>")
+    return f"<div class=segment role=group aria-label='How many orders'>{''.join(parts)}</div>"
+
+
 def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapter],
-            base: str | None = None, token: str | None = None, learned: dict[str, int] | None = None) -> str:
-    """``base`` (like "/r/<id>") turns on the pick / not this / change buttons."""
+            base: str | None = None, token: str | None = None, learned: dict[str, int] | None = None,
+            options: dict | None = None, undo: bool = False) -> str:
+    """``base`` (like "/r/<id>") turns on the pick / not this / change buttons, quantities and order limits."""
     q = f"?t={escape(token)}" if token else ""
     n = len(result.items)
     when = result.created_at.astimezone().strftime("%d %b, %H:%M")
@@ -494,7 +542,13 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
            + (f"<a class=go href='#pick-{first_pick}'>Choose products</a>" if first_pick is not None else
               "<a class=go href='#plan'>Best plan</a>")
            + f"<a href='/{q}'>New list</a></nav>") if base else ""
-    body = (f"<div class='panel plan'>{plan}</div>{notice}{_one_shop_html(result, settings)}{tips_html}"
+    undo_html = (f"<p class=notice><b>Line removed.</b> {_button(base + '/undo', q, 'Undo', {}, 'link')}</p>"
+                 if undo and base else "")
+    old = (now_utc() - result.created_at).total_seconds() > 30 * 60
+    refresh = (f"<p class='notice'><b>Prices are over 30 minutes old.</b> "
+               f"{_button(base + '/refresh', q, 'Refresh prices', {}, 'link')}</p>") if old and base else ""
+    body = (f"{_orders_html(result, settings, options, base, q)}<div class='panel plan'>{plan}</div>{undo_html}{refresh}{notice}"
+            f"{_one_shop_html(result, settings)}{tips_html}"
             f"<h2>{'Choose your products and compare' if pending else 'Every price, item by item'}</h2>{lines}{notes_html}{bar}")
     return page("Basket comparison", body, header)
 

@@ -124,14 +124,7 @@ def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adap
         rejected = r.recall.rejected if r.recall else set()
         r.cards = product_cards(r.request, [o for offers in r.candidates.values() for o in offers],
                                 r.recall.avoid if r.recall else frozenset(), rejected)
-    matches = {
-        a.name: {i: r.matches[a.name] for i, r in enumerate(result.items) if r.matches.get(a.name)} for a in active
-    }
-    fees = settings.fees()
-    for a in active:  # a platform's own numbers beat what is typed in platforms.toml
-        live = a.live_fees()
-        if live:
-            fees[a.name] = live
+    matches, fees = _matches(result, active), _fees(result, settings, active)
     result.proposals = optimise(matches, len(result.items), fees, result.max_orders or settings.max_orders,
                                 result.exact_only)
     result.unverified_fees = [a.name for a in active if not (a.name in fees and fees[a.name].verified)]
@@ -142,6 +135,31 @@ def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adap
         chosen = result.proposals[0].assignments.get(i) if result.proposals else None
         r.confidence = (1.0 if chosen.pinned else learner.confidence(r.request, chosen.offer, pool)) if (chosen and learner) else None
     return result
+
+
+def _matches(result: CompareResult, active: list[Adapter]) -> dict[str, dict[int, Match]]:
+    return {a.name: {i: r.matches[a.name] for i, r in enumerate(result.items) if r.matches.get(a.name)} for a in active}
+
+
+def _fees(result: CompareResult, settings: Settings, active: list[Adapter]) -> dict:
+    fees = settings.fees()
+    for a in active:  # a platform's own numbers beat what is typed in platforms.toml
+        live = a.live_fees()
+        if live:
+            fees[a.name] = live
+    return fees
+
+
+def plan_options(result: CompareResult, settings: Settings, adapters: dict[str, Adapter],
+                 limits: tuple[int, ...] = (1, 2, 3)) -> dict[int, Proposal | None]:
+    """Best total for each order limit ("1 shop", "up to 2", "up to 3"), from the matches already made."""
+    active = [adapters[p] for p in result.platforms if p in adapters]
+    matches, fees = _matches(result, active), _fees(result, settings, active)
+    out = {}
+    for k in limits:
+        best = optimise(matches, len(result.items), fees, k, result.exact_only)
+        out[k] = best[0] if best else None
+    return out
 
 
 def all_offers(result: CompareResult) -> list[Offer]:
