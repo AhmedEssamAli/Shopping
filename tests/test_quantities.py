@@ -310,3 +310,15 @@ def test_only_known_brands_carry_to_other_shops():
     fresh = next(c for c in cards if c.brand == "fresh")
     juh = next(c for c in cards if c.brand == "juhayna")
     assert "fresh" not in fresh.words and "juhayna" in juh.words
+
+
+async def test_choice_section_folds_and_shops_are_links(tmp_path):
+    from shopper.report import _line_html
+    from test_memory import COFFEE, core as coffee_core
+    app = coffee_core(tmp_path)
+    result, _, rid = await app.run([COFFEE])
+    html = _line_html(result, app.settings, 0, f"/r/{rid}", "?t=k")
+    assert "<details class='choose pick' id=pick-0 open><summary>Which one do you mean?" in html
+    jar = next(c for c in result.items[0].cards if "jar" in c.forms)
+    for o in jar.per_platform().values():
+        assert f"<a href='{o.url}' target='_blank' rel='noopener'>" in html

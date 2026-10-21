@@ -240,9 +240,10 @@ img.mini{width:36px;height:36px;object-fit:contain;background:#fff;border-radius
 .bag li>span:first-child{min-width:0;overflow-wrap:anywhere}main a{overflow-wrap:anywhere}
 .choices{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:10px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x mandatory}
 .choice{scroll-snap-align:start;border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--card);display:flex;flex-direction:column;gap:6px}
-.choice ul.sold{list-style:none;margin:0;padding:0;font-size:13px}.choice ul.sold li{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-top:1px solid var(--line)}
+.choice ul.sold{list-style:none;margin:0;padding:0;font-size:13px}.choice ul.sold a{color:var(--primary);font-weight:600}.choice ul.sold li{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-top:1px solid var(--line)}
 .choice h3{font-size:15px;line-height:1.3}.choice h3 a{text-decoration:none}.choice .push{margin-top:auto}
-details.choose{margin:10px 0 0}details.choose summary{cursor:pointer;font-size:14px;color:var(--muted)}
+details.choose{margin:10px 0 0}details.choose.pick>summary{font-family:var(--head);font-weight:600;font-size:15px;color:var(--ink)}
+details.choose>.choices{margin-top:10px}details.choose summary{cursor:pointer;font-size:14px;color:var(--muted)}
 form.inline{display:inline;margin:0}
 button{font:inherit;font-size:16px;font-weight:600;border:2px solid transparent;border-radius:12px;min-height:48px;padding:10px 26px;background:var(--primary);color:var(--on-primary);cursor:pointer;box-shadow:var(--lift);transition:transform .2s ease-out,box-shadow .2s ease-out,background-color .2s}
 button:hover{background:var(--primary-hover);transform:translateY(-2px);box-shadow:var(--lift-hover)}button:active{transform:none}
@@ -551,7 +552,8 @@ def _cards_html(result: CompareResult, settings: Settings, i: int, base: str | N
     for c in r.cards:
         best = c.cheapest()
         shops = c.per_platform()
-        listings = "".join(f"<li><span>{escape(label(settings, p))}</span><span class=num>{o.price:,.2f}</span></li>"
+        listings = "".join(f"<li><a href='{escape(o.url)}' target='_blank' rel='noopener'>{escape(label(settings, p))}</a>"
+                           f"<span class=num>{o.price:,.2f}</span></li>"
                            for p, o in shops.items())
         tag = "" if c.exact else "<span class='flag close'>other size or wording</span>"
         pic = next((o for o in c.offers if getattr(o, "image", "")), None)
@@ -673,8 +675,11 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
     choose = ""
     if r.cards and not r.pinned:
         cards = _cards_html(result, settings, i, base, q)
-        choose = (f"<div id=pick-{i}><h3 class=small style='margin:16px 0 8px'>Which one do you mean?</h3>{cards}</div>"
-                  if r.needs_pick else f"<details class=choose id=pick-{i}><summary>Wrong product? Choose</summary>{cards}</details>")
+        n = len(r.cards)
+        choose = (f"<details class='choose pick' id=pick-{i} open><summary>Which one do you mean? "
+                  f"<span class='muted small'>{n} product{'s' if n != 1 else ''}</span></summary>{cards}</details>"
+                  if r.needs_pick else f"<details class=choose id=pick-{i}><summary>Wrong product? Choose "
+                  f"<span class='muted small'>{n} product{'s' if n != 1 else ''}</span></summary>{cards}</details>")
     key = {"item": i, "line": r.request.query}
     qty = stepper(base and base + "/qty", q, r.request.qty, key, r.request.query)
     drop = _button(base and base + "/remove", q, "Remove line", key) if len(result.items) > 1 else ""
