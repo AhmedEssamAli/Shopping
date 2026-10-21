@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import pwa
 from .app import App
+from .models import now_utc
 from .entry import BRANDS, TYPES, compose, entry_of
 from .report import fields_html, page, stepper, steps_html
 
@@ -393,10 +394,15 @@ def create_app(core: App) -> FastAPI:
         result = core.results.get(rid)
         if result is None:  # from history: its buttons would act on a comparison that is gone
             html = re.sub(r"<form method=post action='/r/[^']*'.*?</form>", "", html, flags=re.S)
+            html = html.replace("<div class=notice></div>", "")  # the Undo notice lived inside its form
             note = (f"<p class=notice><b>From history.</b> Prices are from then, and choices need a fresh comparison. "
                     f"<a href='/{q(t)}'>Compare again</a></p>")
             html = html.replace("<main>", "<main>" + note, 1)
-        elif rid in core.push_log:
+        elif (now_utc() - result.created_at).total_seconds() > 30 * 60:
+            html = html.replace("<!--refresh-->", f"<div class=notice><form method=post action='/r/{escape(rid)}/refresh{q(t)}' "
+                                f"class=inline><b>Prices are over 30 minutes old.</b> <button class=link>Refresh prices</button>"
+                                f"</form></div>", 1)
+        if result is not None and rid in core.push_log:
             html = html.replace("<!--cart-push-->", "<p class='muted small'>Added to your carts already: "
                                 + escape("; ".join(core.push_log[rid])) + "</p>", 1)
         return pwa.add_head(html, t)
@@ -425,9 +431,11 @@ def create_app(core: App) -> FastAPI:
             raise HTTPException(status_code=410, detail="This comparison is no longer open, because shopper "
                                 "restarted since. Compare the list again to change it.")
 
-    def new_qty(qty: str, delta: str) -> int:
+    def new_qty(qty: str, delta: str) -> int | None:
+        if not qty.strip():
+            return None  # an emptied box changes nothing; "Remove line" removes
         try:
-            return int(qty.strip() or 0) + int(delta or 0)
+            return int(qty.strip()) + int(delta or 0)
         except ValueError:
             raise HTTPException(status_code=400, detail="The quantity must be a whole number.") from None
 
@@ -515,11 +523,12 @@ def create_app(core: App) -> FastAPI:
 
     @api.post("/r/{rid}/{action}")
     async def feedback(rid: str, action: str, item: int = Form(...), card: str | None = Form(None),
-                       platform: str | None = Form(None), offer: str | None = Form(None), t: str | None = Query(None)):
+                       platform: str | None = Form(None), offer: str | None = Form(None), line: str | None = Form(None),
+                       t: str | None = Query(None)):
         check(t)
         if action not in ("pick", "reject", "forget", "confirm", "deny"):
             raise HTTPException(status_code=404)
-        if core.feedback(rid, action, item, card, platform, offer) == "gone":
+        if core.feedback(rid, action, item, card, platform, offer, line) == "gone":
             raise HTTPException(status_code=410, detail="This comparison is no longer open, because shopper "
                                 "restarted since. Compare the list again to choose products.")
         return RedirectResponse(f"/r/{rid}{q(t)}", status_code=303)

@@ -29,7 +29,13 @@ def measures(events: list[tuple[str, str, str, str]], days: int = 30) -> dict:
             done.setdefault(rid, set()).add(shop)
         elif kind == "order_undone":
             done.setdefault(rid, set()).discard(shop)
-    split = [(rid, int(detail.split(":")[1])) for _, rid, detail in compares if ":" in detail and int(detail.split(":")[1]) > 1]
+    orders: dict[str, int] = {}  # each comparison's latest plan size: compare first, then any re-plan
+    for _, kind, rid, detail in ev:
+        if kind == "compare" and ":" in detail:
+            orders[rid] = int(detail.split(":")[1] or 0)
+        elif kind == "plan" and detail.isdigit():
+            orders[rid] = int(detail)
+    split = [(rid, n) for rid, n in orders.items() if n > 1]
     complete = sum(1 for rid, n in split if len(done.get(rid, ())) >= n)
     return {"days": days, "comparisons": len(compares),
             "review_to_compare_s": round(median(review_secs)) if review_secs else None,

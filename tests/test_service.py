@@ -145,6 +145,6 @@ def test_web_is_an_installable_app_with_cart_button(tmp_path):
     assert "Add 1 item to cart" in page.text and "/push-shop?t=secret" in page.text
     rid = page.url.path.split("/")[-1]
     pushed = client.post(f"/r/{rid}/push-shop?t=secret", data={"shop": "a"}, follow_redirects=True)
-    assert "added: 1 × Juhayna Full Cream Milk 1L" in pushed.text and "Placed" in pushed.text
+    assert "added: 1 × Juhayna Full Cream Milk 1L" in pushed.text and "Done: order placed" in pushed.text  # a full cart is not an order
     assert "already added from its order card" in client.post(f"/r/{rid}/push?t=secret").text
     assert client.post(f"/r/{rid}/push").status_code == 404

@@ -21,6 +21,19 @@ from .store import Store
 HOUSEHOLD = 0  # one shared list for every allowed Telegram chat and the web page
 
 
+def _lines_key(lines) -> tuple:
+    return tuple(sorted((o.platform, o.url, o.name, qty) for o, qty in lines))
+
+
+def _plan_key(result) -> dict[str, tuple]:
+    """Each shop's lines in the best plan, to see what a re-plan changed."""
+    best = result.best
+    if not best:
+        return {}
+    return {p: _lines_key([(m.offer, m.request.qty) for m in best.assignments.values() if m.offer.platform == p])
+            for p in best.platforms}
+
+
 class App:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or load_settings()
@@ -38,6 +51,7 @@ class App:
         self.removed: dict[str, tuple[int, object]] = {}  # result id -> last line removed there, for Undo
         self.shop_pushes: dict[tuple[str, str], list[str]] = {}  # (result id, shop) -> what one order card's push did
         self.done: dict[str, set[str]] = {}  # result id -> shops whose order you ticked as placed
+        self.pushed_lines: dict[tuple[str, str], tuple] = {}  # what each card push put in the cart
         for name, a in self.adapters.items():  # the delivery area you chose on the home page
             saved = self.store.pref(f"area:{name}")
             if saved and hasattr(a, "use_area"):
@@ -143,7 +157,22 @@ class App:
         return True
 
     def _replan(self, rid: str) -> None:
-        assemble(self.results[rid], self.settings, self.adapters, learner=self.learner)
+        """Plan again from the fetched offers. A shop's cart push and Done tick stay only while
+        that shop's lines are unchanged; a whole-plan push stays only while the plan is unchanged."""
+        result = self.results[rid]
+        before = _plan_key(result)
+        assemble(result, self.settings, self.adapters, learner=self.learner)
+        after = _plan_key(result)
+        if after != before:
+            self.push_log.pop(rid, None)
+        for shop in list(self.done.get(rid, ())):
+            if before.get(shop) != after.get(shop):
+                self.done[rid].discard(shop)
+        for key in [k for k in self.shop_pushes if k[0] == rid]:
+            if self.pushed_lines.get(key) != after.get(key[1]):
+                self.shop_pushes.pop(key, None)
+                self.pushed_lines.pop(key, None)
+        self.store.log("plan", rid, str(len(result.best.platforms) if result.best else 0))
         self._render(rid)
 
     # The household list, shared by Telegram and the web page.
@@ -204,7 +233,7 @@ class App:
         return True
 
     def feedback(self, rid: str, action: str, item: int, card: str | None = None, platform: str | None = None,
-                 offer: str | None = None) -> str:
+                 offer: str | None = None, line: str | None = None) -> str:
         """Apply a pick / reject / forget, then re-match the offers already fetched (no new
         search) and re-render the page.
 
@@ -215,8 +244,8 @@ class App:
         result = self.results.get(rid)
         if result is None:
             return "gone"
-        if not 0 <= item < len(result.items):
-            return "stale"
+        if not 0 <= item < len(result.items) or (line is not None and result.items[item].request.query != line):
+            return "stale"  # lines can be removed, so a position alone may now name another line
         r = result.items[item]
         m = r.matches.get(platform) if platform else None
         if action == "confirm" and m and not r.pinned and offer_key(m.offer) == offer:
@@ -284,15 +313,18 @@ class App:
         lines = [(m.offer, m.request.qty) for m in best.assignments.values() if m.offer.platform == shop]
         try:
             self.shop_pushes[(rid, shop)] = [f"{a.label}: {x}" for x in await a.add_to_cart(lines)]
-        except Exception as e:
-            self.shop_pushes[(rid, shop)] = [f"{a.label}: cart push failed: {type(e).__name__}: {e}"]
-        self.done.setdefault(rid, set()).add(shop)
-        self.store.log("order_done", rid, shop)
-        self._render(rid)
+            self.pushed_lines[(rid, shop)] = _lines_key(lines)
+        except BaseException as e:  # a failed or cancelled push can be tried again
+            del self.shop_pushes[(rid, shop)]
+            if not isinstance(e, Exception):
+                raise
+            return [f"{a.label}: cart push failed: {type(e).__name__}: {e}. Try again."]
+        self._render(rid)  # filling a cart is not placing the order: you still tick Done
         return self.shop_pushes[(rid, shop)]
 
     def mark_done(self, rid: str, shop: str, done: bool = True) -> bool:
-        if rid not in self.results:
+        result = self.results.get(rid)
+        if result is None or not result.best or shop not in result.best.platforms:
             return False
         (self.done.setdefault(rid, set()).add if done else self.done.setdefault(rid, set()).discard)(shop)
         self.store.log("order_done" if done else "order_undone", rid, shop)

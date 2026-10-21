@@ -195,3 +195,53 @@ def test_measures_from_the_event_log():
     m = measures(ev)
     assert m["comparisons"] == 2 and m["review_to_compare_s"] == 95 and m["qty_changes"] == 1
     assert (m["split_plans"], m["split_plans_all_done"], m["all_done_pct"]) == (2, 1, 50)
+
+
+class Pushy(Fake):
+    supports_cart_push = True
+    fail = False
+
+    async def add_to_cart(self, lines):
+        if self.fail:
+            raise RuntimeError("timeout")
+        return [f"added: {q} × {o.name}" for o, q in lines]
+
+
+async def test_card_push_failure_can_retry_and_replan_resets_pushes(tmp_path):
+    app = core(tmp_path)
+    app.adapters = {n: Pushy(n, items) for n, items in CAT.items()}
+    result, _, rid = await app.run(LIST, max_orders=1)
+    shop = result.best.platforms[0]
+    app.adapters[shop].fail = True
+    assert "Try again" in (await app.push_shop(rid, shop))[0] and (rid, shop) not in app.shop_pushes
+    assert shop not in app.done.get(rid, set())  # a failed push is not an order placed
+    app.adapters[shop].fail = False
+    assert "added" in (await app.push_shop(rid, shop))[0] and shop not in app.done.get(rid, set())
+    assert app.mark_done(rid, shop) and not app.mark_done(rid, "not-in-plan")
+    app.edit_line(rid, 0, "Juhayna skimmed milk 1L", qty=6)  # the cart now holds the old quantity
+    assert (rid, shop) not in app.shop_pushes and shop not in app.done[rid]
+    assert "added: 6 ×" in (await app.push_shop(rid, shop))[0]
+
+
+async def test_change_button_is_keyed_by_line(tmp_path):
+    app = core(tmp_path)
+    result, _, rid = await app.run(LIST)
+    assert app.feedback(rid, "forget", 1, line="eggs 30 pcs") == "stale"  # item 1 is rice
+
+
+def test_enter_in_the_quantity_box_does_not_press_minus():
+    from shopper.report import stepper
+    html = stepper("/r/x/qty", "", 3, {"item": 0}, "milk")
+    assert "event.key==='Enter'" in html and "event.preventDefault()" in html
+
+
+async def test_refresh_notice_when_prices_are_old(tmp_path):
+    from datetime import timedelta
+    app = core(tmp_path)
+    result, _, rid = await app.run(LIST)
+    client = TestClient(create_app(app))
+    assert "Refresh prices" not in client.get(f"/r/{rid}?t=k").text
+    result.created_at -= timedelta(hours=2)
+    assert "Refresh prices" in client.get(f"/r/{rid}?t=k").text
+    new = client.post(f"/r/{rid}/refresh?t=k", follow_redirects=True)
+    assert new.url.path != f"/r/{rid}" and "Refresh prices" not in new.text

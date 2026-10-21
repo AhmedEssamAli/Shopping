@@ -499,7 +499,7 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
     state = ""
     plan = result.best.assignments.get(i) if result.best else None
     if r.pinned:
-        state = "<span class='state muted'>your product</span>" + _button(base and base + "/forget", q, "change", {"item": i})
+        state = "<span class='state muted'>your product</span>" + _button(base and base + "/forget", q, "change", {"item": i, "line": r.request.query})
     elif r.needs_pick:
         state = f"<a class='state pick' href='#pick-{i}'>choose your product</a>"
     elif plan and base:
@@ -543,6 +543,7 @@ def stepper(action: str | None, q: str, qty: int, fields: dict, label_text: str)
     return (f"<form method=post action='{escape(action)}{q}' class=stepper>{hidden}"
             f"<button name=delta value=-1 aria-label='One less {escape(label_text)}'>−</button>"
             f"<input name=qty value={qty} inputmode=numeric aria-label='How many {escape(label_text)}' "
+            f"onkeydown=\"if(event.key==='Enter'){{event.preventDefault();this.form.submit()}}\" "
             f"onchange='this.form.submit()'><button name=delta value=1 aria-label='One more {escape(label_text)}'>+</button>"
             f"</form><span class=qty>{qty}×</span>")
 
@@ -601,11 +602,9 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
            + (f"<a class=go href='#pick-{first_pick}'>Choose products</a>" if first_pick is not None else
               "<a class=go href='#plan'>Best plan</a>")
            + f"<a href='/{q}'>New list</a></nav>") if base else ""
-    undo_html = (f"<p class=notice><b>Line removed.</b> {_button(base + '/undo', q, 'Undo', {}, 'link')}</p>"
-                 if undo and base else "")
-    old = (now_utc() - result.created_at).total_seconds() > 30 * 60
-    refresh = (f"<p class='notice'><b>Prices are over 30 minutes old.</b> "
-               f"{_button(base + '/refresh', q, 'Refresh prices', {}, 'link')}</p>") if old and base else ""
+    undo_html = (f"<div class=notice><form method=post action='{escape(base)}/undo{q}' class=inline><b>Line removed.</b> "
+                 f"<button class=link>Undo</button></form></div>" if undo and base else "")
+    refresh = "<!--refresh-->" if base else ""  # filled when the page is served, once prices are old
     body = (f"{_orders_html(result, settings, options, base, q)}<div class='panel plan'>{plan}</div>{undo_html}{refresh}{notice}"
             f"{_one_shop_html(result, settings)}{tips_html}"
             f"<h2>{'Choose your products and compare' if pending else 'Every price, item by item'}</h2>{lines}{notes_html}{bar}")

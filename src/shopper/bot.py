@@ -228,8 +228,8 @@ def parse_callback(data: str) -> tuple[str, str, int, str | None] | None:
     try:
         if parts[0] == "pk" and len(parts) == 4:
             return "pick", parts[1], int(parts[2]), parts[3]
-        if parts[0] == "fg" and len(parts) == 3:
-            return "forget", parts[1], int(parts[2]), None
+        if parts[0] == "fg" and len(parts) in (3, 4):  # "fg:<rid>:<item>:<line tag>"
+            return "forget", parts[1], int(parts[2]), parts[3] if len(parts) == 4 else None
     except ValueError:
         pass
     return None
@@ -532,12 +532,15 @@ def build_bot(core: App) -> Application:
         action, rid, i, key = parsed
         r = result.items[i] if 0 <= i < len(result.items) else None
         chosen = next((c.label for c in r.cards if c.key == key), None) if r else None
-        if core.feedback(rid, action, i, card=key) != "ok":
+        if action == "forget" and key and not (r and line_tag(r.request.query) == key):
+            await query.answer("The list changed; nothing was changed.", show_alert=True)
+            return
+        if core.feedback(rid, action, i, card=key if action == "pick" else None) != "ok":
             await query.answer("Already done, or that choice is no longer available.", show_alert=True)
             return
         await query.answer("Saved")
         if action == "pick":
-            again = InlineKeyboardMarkup([[InlineKeyboardButton("Choose again", callback_data=f"fg:{rid}:{i}")]])
+            again = InlineKeyboardMarkup([[InlineKeyboardButton("Choose again", callback_data=f"fg:{rid}:{i}:{line_tag(r.request.query)}")]])
             await safe_edit(query, f"Chosen for {r.request.query}: {chosen}. I will use it next time too.", again)
         else:
             await safe_edit(query, f"Which one do you mean? {r.request.qty} × {r.request.query}",
