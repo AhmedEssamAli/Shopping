@@ -9,6 +9,7 @@
   shopper browser-check                 check that shopper can attach to Shopping Chrome, and how fast
   shopper watch-check                   re-price all watches now and print alerts
   shopper talabat-shops                 list every talabat grocery shop that delivers to you
+  shopper instashop-shops               list the Instashop shops your Shopping Chrome shows for your address
   shopper refresh talabat               re-read all talabat shop catalogues now (or one: talabat_<id>)
   shopper serve                         run Telegram bot + web page (home PC)
   shopper stats [--days 30]             the bulk-ordering measures from your own use
@@ -187,6 +188,26 @@ async def _cmd_talabat_shops(args) -> None:
     print("\n* = already in config/platforms.toml. Paste lines into [talabat] shops to add more.")
 
 
+async def _cmd_instashop_shops(args) -> None:
+    from .adapters.instashop import list_shops
+    from .browser import BrowserSession
+
+    s = load_settings()
+    on = {p.options.get("slug") for p in s.platforms.values() if p.options.get("instashop_shop")}
+    session = BrowserSession(s)
+    try:
+        shops = await list_shops(session, args.url)
+    finally:
+        await session.close()
+    for v in sorted(shops, key=lambda v: (v["name"] or v["slug"]).lower()):
+        mark = "*" if v["slug"] in on else " "
+        name = v["name"] or v["slug"].replace("-", " ").title()
+        print(f"{mark} {name[:40]}")
+        print(f'    {{slug = "{v["slug"]}", label = "{name} (Instashop)"}},')
+    print(f"\n{len(shops)} shops. * = already in config/platforms.toml. Paste lines into [instashop] shops to add more;"
+          " each one is searched in Shopping Chrome, so pick the few you use.")
+
+
 async def _cmd_browser_check(args) -> None:
     import os
     import time
@@ -300,6 +321,8 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("refresh"); p.add_argument("platform"); p.set_defaults(fn=_cmd_refresh)
     sub.add_parser("talabat-shops").set_defaults(fn=_cmd_talabat_shops)
     sub.add_parser("browser-check").set_defaults(fn=_cmd_browser_check)
+    p = sub.add_parser("instashop-shops"); p.add_argument("--url", default="https://instashop.com/en-eg")
+    p.set_defaults(fn=_cmd_instashop_shops)
     sub.add_parser("serve").set_defaults(fn=_cmd_serve)
     args = ap.parse_args(argv)
     if getattr(args, "sync", False):

@@ -121,3 +121,23 @@ async def test_noon_add_to_cart_presses_button_with_full_quantity(browser, tmp_p
         srv.shutdown()
     assert out == ["added: 3 × Nescafe Classic Sachet 200grams"]
     assert posts == ["/_vs/nc/mp-noon-api-cart/cart/item/bc050c6c/3?showCart"]
+
+
+async def test_instashop_without_results_popup_is_an_error_not_shop_tiles(browser, tmp_path):
+    tiles = (Path(__file__).parent / "fixtures" / "instashop_products.html").read_text(encoding="utf-8")
+    page = INSTASHOP_SHOP.replace("<script>", "<script>window.POPUP = '';", 1).replace('<div id="popup"></div>', tiles)
+    ctx = await serve(browser, {"https://instashop.com/en-eg/client/mahmoud-elfar-mivida": page})
+    a = InstashopAdapter("instashop_x", "ElFar", "mahmoud-elfar-mivida", FakeSession(ctx, tmp_path), wait_s=2)
+    with pytest.raises(RuntimeError, match="did not open"):
+        await a.search("Nescafe classic")
+    assert list((tmp_path / "instashop_x").glob("failed-search-*"))
+
+
+async def test_instashop_lists_shops_from_links(browser, tmp_path):
+    from shopper.adapters.instashop import list_shops
+    home = ("<html><body><a href='/en-eg/client/mahmoud-elfar-mivida'><span>Mahmoud ElFar</span></a>"
+            "<a href='/en-eg/client/el-ezaby-pharmacy-5th'>El Ezaby Pharmacy</a><a href='/en-eg/about'>About</a></body></html>")
+    ctx = await serve(browser, {"https://instashop.com/en-eg": home})
+    shops = await list_shops(FakeSession(ctx, tmp_path), scrolls=1)
+    assert sorted((s["slug"], s["name"]) for s in shops) == [("el-ezaby-pharmacy-5th", "El Ezaby Pharmacy"),
+                                                             ("mahmoud-elfar-mivida", "Mahmoud ElFar")]

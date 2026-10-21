@@ -15,6 +15,14 @@ product is an ``nb-list-item`` with ``h5`` (title), ``h6.packagingString`` (size
 ``.price``. The items carry no product link, so offers link to the shop page.
 Assumption, not verified: the popup lists only this shop's products (it is opened from
 the shop page and names no other shop).
+
+Fixed 2026-10-21: when the popup did not open, the reader fell back to the shop page's
+featured tiles, so a search "worked" but returned unrelated products and nothing matched,
+with no error. Now only popup rows count; no popup is an error with the page saved.
+
+More shops: Instashop lists many shops (supermarkets, pharmacies, butchers) like talabat.
+``shopper instashop-shops`` reads the shop links from the page in your Shopping Chrome and
+prints lines for config/platforms.toml.
 """
 from __future__ import annotations
 
@@ -53,6 +61,42 @@ EXTRACT_JS = """() => {
   return [...popup, ...tiles].filter(x => x.title && x.price);
 }"""
 
+# The popup part of EXTRACT_JS alone: search results, without the shop page's featured tiles.
+POPUP_JS = EXTRACT_JS.replace("return [...popup, ...tiles].filter(x => x.title && x.price);",
+                              "return popup.filter(x => x.title && x.price);")
+assert POPUP_JS != EXTRACT_JS
+
+SHOPS_JS = """() => {
+  const out = {};
+  for (const a of document.querySelectorAll('a[href*="/client/"]')) {
+    const m = a.getAttribute('href').match(/\\/client\\/([\\w-]+)/);
+    if (!m) continue;
+    const name = (a.getAttribute('title') || a.getAttribute('aria-label') || a.innerText || '').trim().split('\\n')[0];
+    if (!out[m[1]] || (name && out[m[1]].length < name.length)) out[m[1]] = name;
+  }
+  return Object.entries(out).map(([slug, name]) => ({slug, name}));
+}"""
+
+
+async def list_shops(session: BrowserSession, url: str = "https://instashop.com/en-eg", scrolls: int = 8) -> list[dict]:
+    """Shops Instashop shows for the address set in your Shopping Chrome, read from its rendered page."""
+    page = await session.new_page()
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        await page.wait_for_timeout(4000)
+        for _ in range(scrolls):  # the list loads as you scroll
+            await page.mouse.wheel(0, 4000)
+            await page.wait_for_timeout(800)
+        shops = await safe_evaluate(page, SHOPS_JS, [])
+        if not shops:
+            dump = dump_page(session.settings, "instashop", "shop list", await page.content(), {"url": page.url})
+            raise RuntimeError(f"No Instashop shop links found on {page.url}. Open Instashop in Shopping Chrome, set "
+                               f"your address, and try again. Saved the page to {dump}.")
+        return shops
+    finally:
+        await page.close()
+
+
 _NUM = re.compile(r"\d+(?:[.,]\d+)?")
 
 
@@ -69,6 +113,7 @@ class InstashopAdapter(Adapter):
         self.session = session
         self.wait_s = wait_s
         self.login_url = f"{BASE}/{slug}"
+        self.keep_page = False  # --debug: save the results page too
 
     async def search(self, query: str, limit: int = 12) -> list[Offer]:
         page = await self.session.new_page()
@@ -80,10 +125,13 @@ class InstashopAdapter(Adapter):
             await box.click()
             await box.press_sequentially(query, delay=40)
             await box.press("Enter")
-            rows = await self._poll(page, want)
-            if not rows:
-                dump = dump_page(self.session.settings, self.name, query, await page.content(), {"url": page.url})
-                raise RuntimeError(f"{self.label}: no products after searching. Saved the page to {dump} — send me that folder.")
+            rows, popup = await self._poll(page, want)
+            if self.keep_page or not popup:
+                dump = dump_page(self.session.settings, self.name, query, await page.content(), {"url": page.url},
+                                 kind="search" if popup else "failed-search")
+                if not popup:
+                    raise RuntimeError(f"{self.label}: the search results did not open (the page may ask for your "
+                                       f"address or a sign-in). Saved the page to {dump} — send me that folder.")
         finally:
             await page.close()
         return self.parse(rows)[:limit]
@@ -92,16 +140,19 @@ class InstashopAdapter(Adapter):
     def _relevant(rows: list[dict], want: list[str]) -> bool:
         return any(any(has_word(w, tokens(r["title"])) for w in want) for r in rows)
 
-    async def _poll(self, page, want: list[str]) -> list[dict]:
-        """Wait until the results reflect the query, then once more for the list to fill."""
+    async def _poll(self, page, want: list[str]) -> tuple[list[dict], bool]:
+        """Wait for the results popup to show this query. Returns (popup rows, whether the popup opened).
+        Only popup rows count: the shop page's own tiles are not search results."""
         rows: list[dict] = []
+        popup = False
         for _ in range(int(self.wait_s * 2)):
             await page.wait_for_timeout(500)
-            rows = await safe_evaluate(page, EXTRACT_JS, [])
-            if self._relevant(rows, want):
+            popup = await safe_evaluate(page, "() => !!document.querySelector('app-search-page')", False)
+            rows = [r for r in await safe_evaluate(page, POPUP_JS, []) if r.get("title")]
+            if popup and self._relevant(rows, want):
                 await page.wait_for_timeout(1000)
-                return await safe_evaluate(page, EXTRACT_JS, rows)
-        return rows
+                return [r for r in await safe_evaluate(page, POPUP_JS, rows) if r.get("title")], True
+        return rows, popup
 
     def parse(self, rows: list[dict]) -> list[Offer]:
         out, seen = [], set()
