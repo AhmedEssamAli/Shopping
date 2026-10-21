@@ -48,6 +48,13 @@ class CompareResult:
     created_at: datetime = field(default_factory=now_utc)
     max_orders: int | None = None
     exact_only: bool = False
+    excluded: set[str] = field(default_factory=set)  # shops you filtered out on the page
+    brands: set[str] = field(default_factory=set)  # only these brands, when set (folded names)
+
+    @property
+    def shops(self) -> list[str]:
+        """The shops the plan may use: searched and not filtered out."""
+        return [p for p in self.platforms if p not in self.excluded]
 
     @property
     def best(self) -> Proposal | None:
@@ -139,13 +146,15 @@ def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adap
              memory: Memory | None = None, learner=None) -> CompareResult:
     """Match, group and optimise the offers already fetched. Runs again, without searching,
     after you pick or reject a product (pass ``memory`` to re-read what you chose)."""
-    active = [adapters[p] for p in result.platforms if p in adapters]
+    active = [adapters[p] for p in result.shops if p in adapters]
     for r in result.items:
         if memory:
             r.recall = memory.recall(r.request)
-        r.matches = {p: match_on(r.request, p, offers, r.recall, learner) for p, offers in r.candidates.items()}
+        r.matches = {p: match_on(r.request, p, brand_filter(offers, result.brands), r.recall, learner)
+                     for p, offers in r.candidates.items() if p not in result.excluded}
         rejected = r.recall.rejected if r.recall else set()
-        r.cards = product_cards(r.request, [o for offers in r.candidates.values() for o in offers],
+        r.cards = product_cards(r.request, [o for p, offers in r.candidates.items() if p not in result.excluded
+                                            for o in brand_filter(offers, result.brands)],
                                 r.recall.avoid if r.recall else frozenset(), rejected)
     matches, fees = _matches(result, active), _fees(result, settings, active)
     result.proposals = optimise(matches, len(result.items), fees, result.max_orders or settings.max_orders,
@@ -153,11 +162,19 @@ def assemble(result: CompareResult, settings: Settings, adapters: dict[str, Adap
     result.unverified_fees = [a.name for a in active if not (a.name in fees and fees[a.name].verified)]
     for i, r in enumerate(result.items):
         rejected = r.recall.rejected if r.recall else set()
-        pool = [o for offers in r.candidates.values() for o in offers if (o.platform, offer_id(o)) not in rejected]
+        pool = [o for p, offers in r.candidates.items() if p not in result.excluded
+                for o in brand_filter(offers, result.brands) if (o.platform, offer_id(o)) not in rejected]
         r.tip = value_tip(r.request, result.proposals[0].assignments.get(i), pool) if result.proposals else None
         chosen = result.proposals[0].assignments.get(i) if result.proposals else None
         r.confidence = (1.0 if chosen.pinned else learner.confidence(r.request, chosen.offer, pool)) if (chosen and learner) else None
     return result
+
+
+def brand_filter(offers: list[Offer], brands: set[str]) -> list[Offer]:
+    if not brands:
+        return offers
+    from .memory import brand_of
+    return [o for o in offers if brand_of(o.name) in brands]
 
 
 def _matches(result: CompareResult, active: list[Adapter]) -> dict[str, dict[int, Match]]:
@@ -176,7 +193,7 @@ def _fees(result: CompareResult, settings: Settings, active: list[Adapter]) -> d
 def plan_options(result: CompareResult, settings: Settings, adapters: dict[str, Adapter],
                  limits: tuple[int, ...] = (1, 2, 3)) -> dict[int, Proposal | None]:
     """Best total for each order limit ("1 shop", "up to 2", "up to 3"), from the matches already made."""
-    active = [adapters[p] for p in result.platforms if p in adapters]
+    active = [adapters[p] for p in result.shops if p in adapters]
     matches, fees = _matches(result, active), _fees(result, settings, active)
     out = {}
     for k in limits:

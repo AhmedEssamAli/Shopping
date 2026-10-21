@@ -174,6 +174,22 @@ class App:
         self._replan(rid)
         return True
 
+    def set_filter(self, rid: str, keep: set[str] | None = None, brands: set[str] | None = None,
+                   exact: bool | None = None) -> bool:
+        """Filters on the result page: which shops the plan may use, which brands, exact matches only."""
+        result = self.results.get(rid)
+        if result is None:
+            return False
+        if keep is not None:
+            result.excluded = set(result.platforms) - keep if keep else set()  # nothing ticked: all shops
+        if brands is not None:
+            result.brands = brands
+        if exact is not None:
+            result.exact_only = exact
+        self.store.log("filter", rid, f"{len(result.excluded)} out, {len(result.brands)} brands, exact={result.exact_only}")
+        self._replan(rid)
+        return True
+
     def _replan(self, rid: str) -> None:
         """Plan again from the fetched offers. A shop's cart push and Done tick stay only while
         that shop's lines are unchanged; a whole-plan push stays only while the plan is unchanged."""

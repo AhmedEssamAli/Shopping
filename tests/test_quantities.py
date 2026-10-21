@@ -245,3 +245,32 @@ async def test_refresh_notice_when_prices_are_old(tmp_path):
     assert "Refresh prices" in client.get(f"/r/{rid}?t=k").text
     new = client.post(f"/r/{rid}/refresh?t=k", follow_redirects=True)
     assert new.url.path != f"/r/{rid}" and "Refresh prices" not in new.text
+
+
+async def test_filters_one_shop_table_and_research(tmp_path):
+    app = core(tmp_path)
+    client = TestClient(create_app(app))
+    page = client.post("/compare?t=k", data=rows(LIST), follow_redirects=True)
+    rid = page.url.path.split("/")[-1]
+    result = app.results[rid]
+    assert "Filters" in page.text and "<legend>Supermarkets</legend>" in page.text
+    assert "<table class=oneshop>" in page.text and "Use only this shop" in page.text and "missing</summary>" in page.text
+    client.post(f"/r/{rid}/filter?t=k", data={"only": "metro"})
+    assert result.excluded == {"gourmet"} and result.best.platforms == ("metro",)
+    client.post(f"/r/{rid}/filter?t=k", data={"shop": ["metro", "gourmet"], "brand": ["juhayna"]})
+    assert not result.excluded and result.brands == {"juhayna"}
+    assert result.items[0].matches and all("Juhayna" in m.offer.name for m in result.items[0].matches.values() if m)
+    assert not any(result.items[2].matches.values())  # eggs have no Juhayna listing
+    client.post(f"/r/{rid}/filter?t=k", data={"reset": "1"})
+    assert not result.brands and not result.excluded
+    # A line no shop had: adjust it and search that line again.
+    page = client.post("/compare?t=k", data={"item": ["eggz tray"]}, follow_redirects=True)
+    rid2 = page.url.path.split("/")[-1]
+    assert "No shop had this item." in page.text and "<details class=adjust open>" in page.text
+    calls = {n: a.calls for n, a in app.adapters.items()}
+    page = client.post(f"/r/{rid2}/research?t=k", data={"index": 0, "line": "eggz tray", "item": "eggs", "pieces": "30"},
+                       follow_redirects=True)
+    line = app.results[rid2].items[0]
+    assert line.request.query == "eggs 30 pcs" and line.matches.get("metro")
+    assert all(a.calls == calls[n] + 1 for n, a in app.adapters.items())  # only this line was searched again
+    assert client.post(f"/r/{rid2}/research?t=k", data={"index": 0, "line": "old text", "item": "x"}).status_code == 200

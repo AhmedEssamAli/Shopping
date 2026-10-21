@@ -59,6 +59,31 @@ FORM_SCRIPT = ("<script>const prev=r=>{const v=n=>(r.querySelector(`[name=${n}]`
                "t.focus();b.disabled=true}))</script>")
 
 
+# How a typed line is split into the six fields. Shown on the home page and the review step.
+READING_RULES = (
+    "<details class=choose><summary>How shopper reads a typed line</summary><div class=rules>"
+    "<p><b>Exact way:</b> separate the fields with <code>|</code> in this order: "
+    "<code>item | brand | type | size | pieces | how many</code>. Nothing is guessed; leave a field empty to keep it open. "
+    "<code>milk | Juhayna | skimmed | 1L | 6 | 2</code> is 2 six-packs of 1 L Juhayna skimmed milk.</p>"
+    "<p><b>Free way:</b> type the line as you would say it. shopper reads it in this order:</p><ol>"
+    "<li><b>How many</b>: a number at the start or the end that is not a size: <code>2 milk</code>, <code>2x milk</code>, "
+    "<code>milk x2</code>, <code>milk (2)</code>. Otherwise 1.</li>"
+    "<li><b>Size</b>: a number with a unit: <code>1L</code>, <code>1.5 litre</code>, <code>200 ml</code>, <code>500g</code>, "
+    "<code>5 kg</code>. This is the size of one piece.</li>"
+    "<li><b>Pieces in pack</b>: <code>6x1L</code>, <code>6 x 1L</code>, <code>1L pack of 6</code>, <code>30 pcs</code>, "
+    "<code>30 eggs</code>, <code>6 rolls</code>.</li>"
+    "<li><b>Brand</b>: a brand shopper knows (Juhayna, Almarai, Al Doha, Nescafe and about 100 more). An unknown brand "
+    "stays part of the item; type it in the Brand field or use the exact way.</li>"
+    "<li><b>Type</b>: a known type word: skimmed, full cream, low fat, lactose free, basmati, classic, decaf, light, "
+    "a flavour.</li>"
+    "<li><b>Item</b>: every word that is left.</li></ol>"
+    "<p><code>2 Juhayna skimmed milk 6x1L</code> → how many 2, brand Juhayna, type skimmed, item milk, size 1L, pieces 6.</p>"
+    "<p>Arabic and free text: with ANTHROPIC_API_KEY set, Claude fills the same six fields. Either way, "
+    "<b>Check your list</b> shows every field before any search, and every result line can be adjusted and searched again.</p>"
+    "<p><b>Matching:</b> every field you fill must be on the product. An empty field is open: no brand means any brand, "
+    "cheapest wins; no size means you choose from the sizes found.</p></div></details>")
+
+
 def _rows(*cols: list[str]) -> list[list[str]]:
     """Form columns padded to the item column's length, so a missing field reads as empty."""
     n = len(cols[0])
@@ -173,25 +198,16 @@ def create_app(core: App) -> FastAPI:
         chips = ("<p class='muted small' style='margin:12px 0 6px'>Products you chose before</p><div class=chips>"
                  + "".join(f"<button type=button class=chip data-line='{escape(line)}' title='{escape(words)}'>{escape(line)}</button>"
                            for line, words in chosen) + "</div>") if chosen else ""
-        guide = ("<details class=choose><summary>How shopper reads an item</summary><div class=guide>"
-                 "<b>Item</b><span>What it is: milk, rice, instant coffee. Required.</span>"
-                 "<b>Brand</b><span>Only this brand counts as exact. Empty: any brand, cheapest wins.</span>"
-                 "<b>Type</b><span>Variant, flavour or grade: skimmed, full cream, basmati, classic. Empty: shopper "
-                 "still keeps other variants (chocolate, lactose free) out of exact matches.</span>"
-                 "<b>Size of one</b><span>One piece: 1 L, 200 ml, 5 kg. Empty: any size; you choose from the cards.</span>"
-                 "<b>Pieces in pack</b><span>6 for a 6-pack of 1 L; 30 for a tray of eggs. Empty: single piece.</span>"
-                 "<b>How many</b><span>Packs to buy. Empty: 1.</span></div>"
-                 "<p class='muted small'>Typed and pasted lines follow the same order: how many, brand, type, item, "
-                 "pieces x size. <code>2 Juhayna skimmed milk 6x1L</code> is 2 six-packs of 1 L Juhayna skimmed milk.</p>"
-                 "</details>")
+        guide = READING_RULES
         form = (f"<form method=post action='/compare{q(t)}' class='panel plan'>"
                 f"<h2 style='margin:0 0 6px'>What do you want to buy?</h2>"
                 f"<p class='muted small' style='margin:0 0 10px'>One item per row. Only the item is required. Every field "
                 f"you fill must match; every field you leave empty is open.</p>"
                 f"<div id=rows>{item_row() * 2}</div>{ROW_LISTS}{past_list()}<button type=button class=quiet id=addrow>Add another item</button>{guide}"
                 f"<details class=choose{' open' if chosen else ''}><summary>Or paste a list</summary>"
-                f"<p class='muted small' style='margin:8px 0'>One item per line, quantity first or last: "
-                f"<code>2 Juhayna full cream milk 1L</code> or <code>rice 5kg x1</code>. Arabic works too.</p>"
+                f"<p class='muted small' style='margin:8px 0'>One item per line: <code>2 Juhayna full cream milk 1L</code>, or "
+                f"exactly by field: <code>milk | Juhayna | full cream | 1L | | 2</code>. Arabic works too. "
+                f"You check every line before the search.</p>"
                 f"<textarea id=items name=items></textarea>{chips}</details>"
                 f"<details class=choose><summary>Options</summary>"
                 f"<p class=small><label><input type=checkbox name=exact value=1> Exact matches only</label></p>"
@@ -293,7 +309,7 @@ def create_app(core: App) -> FastAPI:
                   f"<p>shopper read {n} line{'s' if n != 1 else ''} like this. Fix anything that is wrong, "
                   f"change quantities, or remove lines. Then compare.</p>{steps_html(2)}")
         form = (f"<form method=post action='/compare{q(t)}' class='panel plan'>"
-                f"<div id=rows>{''.join(item_row(entry_of(r)) for r in requests)}</div>{ROW_LISTS}{past_list()}"
+                f"{READING_RULES}<div id=rows>{''.join(item_row(entry_of(r)) for r in requests)}</div>{ROW_LISTS}{past_list()}"
                 f"<button type=button class=quiet id=addrow>Add another item</button>"
                 f"<input type=hidden name=max_orders value={int(max_orders)}>"
                 + ("<input type=hidden name=exact value=1>" if exact else "")
@@ -438,6 +454,20 @@ def create_app(core: App) -> FastAPI:
         return review_page([r.request for r in result.items], t, result.max_orders or core.settings.max_orders,
                            result.exact_only)
 
+    @api.post("/r/{rid}/filter")
+    async def filters(rid: str, shop: list[str] = Form([]), brand: list[str] = Form([]), exact: str = Form(""),
+                      only: str = Form(""), reset: str = Form(""), t: str | None = Query(None)):
+        check(t)
+        if reset:
+            ok = core.set_filter(rid, set(), set(), False)
+        elif only:
+            ok = core.set_filter(rid, {only})
+        else:
+            ok = core.set_filter(rid, set(shop), set(brand), bool(exact))
+        if not ok:
+            gone("gone")
+        return RedirectResponse(f"/r/{rid}{q(t)}#plan", status_code=303)
+
     @api.post("/r/{rid}/research")
     async def research(rid: str, index: int = Form(...), line: str = Form(""), item: str = Form(""), brand: str = Form(""),
                        kind: str = Form(""), amount: str = Form(""), unit: str = Form(""), pieces: str = Form(""),
@@ -501,6 +531,8 @@ def create_app(core: App) -> FastAPI:
             gone("gone")
         _, _, new = await run_or_explain([r.request for r in result.items], max_orders=result.max_orders,
                                          exact_only=result.exact_only)
+        if result.excluded or result.brands:  # fresh prices, same filters
+            core.set_filter(new, set(result.shops), set(result.brands))
         return RedirectResponse(f"/r/{new}{q(t)}", status_code=303)
 
     @api.post("/r/{rid}/{action}")

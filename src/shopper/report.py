@@ -271,6 +271,7 @@ border-radius:12px;border:1px solid var(--line);background:var(--card);color:var
 .fields{display:flex;flex-wrap:wrap;gap:6px;margin:-2px 0 10px;font-size:13px}
 .fields span{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:2px 10px}
 .fields i{font-style:normal;color:var(--muted);margin-right:4px}.fields .open{opacity:.6}
+.rules{font-size:14px;line-height:1.55}.rules ol{padding-left:20px;margin:6px 0}.rules li{margin:3px 0}
 .guide{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:8px 0;font-size:14px}.guide b{white-space:nowrap}
 select{font:inherit;max-width:100%;min-height:44px;padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 input[type=number]{font:inherit;width:4em;padding:4px 6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
@@ -306,6 +307,21 @@ details.adjust>summary::-webkit-details-marker{display:none}details.adjust>summa
 details.adjust .edit{font-size:13px;font-weight:600;color:var(--primary);text-decoration:underline;text-underline-offset:2px}
 details.adjust[open] .edit{color:var(--muted)}details.adjust form{margin-top:10px}.adjust .droprow{display:none}
 .notice.small{font-size:14px;margin:10px 0}
+/* filters and the one-shop table */
+details.filters{margin:-8px 0 26px}details.filters>summary{cursor:pointer;font-size:16px}details.filters form{margin-top:12px}
+.fgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+fieldset{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:0 0 12px}legend{font-weight:600;font-size:14px;padding:0 4px}
+label.check{display:flex;gap:8px;align-items:center;padding:4px 0;font-size:15px}label.check input{width:18px;height:18px;accent-color:var(--primary)}
+fieldset.brands{display:flex;flex-wrap:wrap;gap:4px 16px}fieldset.brands legend{width:100%}
+.lead{margin:0 0 12px;font-size:15px}.tablewrap{overflow-x:auto}
+table.oneshop{width:100%;border-collapse:collapse;font-size:14px}table.oneshop th,table.oneshop td{text-align:left;padding:10px 8px;border-top:1px solid var(--line);vertical-align:top}
+table.oneshop thead th{border-top:0;color:var(--muted);font-weight:600;font-size:13px}table.oneshop td.num{text-align:right;white-space:nowrap}
+table.oneshop tbody th{font-weight:600}table.oneshop tbody th .link{display:block;margin-top:2px}table.oneshop tr.full th{color:var(--primary)}
+table.oneshop details summary{cursor:pointer;color:var(--danger);font-size:13px}table.oneshop ul{margin:4px 0 0;padding-left:18px;font-size:13px}
+.okay{color:var(--primary);font-size:13px;font-weight:600}details.notes summary{cursor:pointer}
+@media (max-width:620px){table.oneshop thead{display:none}table.oneshop tr{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 0;border-top:1px solid var(--line)}
+table.oneshop th,table.oneshop td{border:0;padding:0}table.oneshop td:nth-child(4),table.oneshop td:nth-child(5){display:none}
+table.oneshop td:last-child{grid-column:1/-1}}
 /* order cards: one per shop, numbered */
 .orders{display:grid;gap:14px;margin-top:16px}@media (min-width:900px){.orders{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}}
 .order{border:1px solid var(--line);border-radius:16px;padding:16px 18px;background:var(--card)}
@@ -444,21 +460,88 @@ def _plan_html(result: CompareResult, prop: Proposal, settings: Settings, adapte
             f"{_order_cards(result, prop, settings, adapters, base, q, state or {})}<!--cart-push-->")
 
 
-def _one_shop_html(result: CompareResult, settings: Settings) -> str:
-    """What the whole basket costs at each shop on its own: the honest comparison."""
+def _one_shop_html(result: CompareResult, settings: Settings, base: str | None = None, q: str = "") -> str:
+    """What the whole basket costs at each shop on its own, and what each shop is missing."""
     singles = sorted((p for p in result.proposals if len(p.platforms) == 1), key=lambda p: (len(p.missing), p.total))
     if len(singles) < 2:
         return ""
-    top = max(p.total for p in singles) or 1
-    n = len(result.items)
+    n, best = len(result.items), result.best
+    full = [p for p in singles if not p.missing]
+    if full and best:
+        extra = full[0].total - best.total
+        lead = (f"<p class=lead><b>{len(full)} of {len(singles)}</b> shops have every item. The cheapest of them is "
+                f"<b>{escape(label(settings, full[0].platforms[0]))}</b> at <b>{_egp(full[0].total)}</b>"
+                + (f", {_egp(extra)} more than the best plan." if extra > 0.005 else ", the same as the best plan.") + "</p>")
+    else:
+        lead = f"<p class=lead>No single shop has all {n} items. The table shows what each one has and misses.</p>"
     rows = []
     for k, p in enumerate(singles):
+        shop = p.platforms[0]
         have = n - len(p.missing)
-        note = "all items" if not p.missing else f"{have} of {n} items"
-        rows.append(f"<li class='{'best' if k == 0 else 'partial' if p.missing else ''}'><span><b>{escape(label(settings, p.platforms[0]))}</b>"
-                    f"<br><span class='muted small'>{note}</span></span><span class=bar><i style='width:{p.total / top * 100:.0f}%'></i></span>"
-                    f"<span class=num>{p.total:,.2f}</span></li>")
-    return f"<h2>If you buy everything in one shop</h2><div class=panel><ul class=shops>{''.join(rows)}</ul></div>"
+        exact = sum(m.exact for m in p.assignments.values())
+        diff = p.total - best.total if best else 0
+        vs = ("best plan" if abs(diff) < 0.005 else f"+{diff:,.2f}") if not p.missing else "—"
+        miss = ("<details><summary>" + f"{len(p.missing)} missing</summary><ul>"
+                + "".join(f"<li>{escape(result.items[i].request.query)}</li>" for i in p.missing) + "</ul></details>"
+                if p.missing else "<span class=okay>Has everything</span>")
+        only = _button(base and base + "/filter", q, "Use only this shop", {"only": shop}, "link") if base else ""
+        rows.append(f"<tr class='{'full' if not p.missing else 'partial'}'><th scope=row>{escape(label(settings, shop))}{only}</th>"
+                    f"<td class=num>{p.total:,.2f}</td><td>{have} of {n}<span class='muted small'> · {exact} exact</span></td>"
+                    f"<td class=num>{p.fees_total:,.2f}</td><td class=num>{vs}</td><td>{miss}</td></tr>")
+    return (f"<h2>If you buy everything in one shop</h2><div class=panel>{lead}<div class=tablewrap><table class=oneshop>"
+            f"<thead><tr><th>Shop</th><th>Total</th><th>Items</th><th>Fees</th><th>vs plan</th><th>Missing</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table></div><p class='muted small'>Totals include the fees shopper knows "
+            f"(see the notes). Shops that miss items are cheaper only because they sell less.</p></div>")
+
+
+SHOP_KINDS = ("Supermarkets", "Quick delivery", "Marketplaces", "From the apps")
+
+
+def shop_kind(name: str, settings: Settings) -> str:
+    p = settings.platforms.get(name)
+    if p and p.status == "app":
+        return "From the apps"
+    if name.startswith(("talabat", "instashop")) or name in ("noon_minutes", "amazon_now"):
+        return "Quick delivery"
+    if name in ("amazon_eg", "noon"):
+        return "Marketplaces"
+    return "Supermarkets"
+
+
+def _filters_html(result: CompareResult, settings: Settings, base: str | None, q: str) -> str:
+    """Which shops the plan may use, which brands, exact matches only. Applying re-plans without a search."""
+    if not base:
+        return ""
+    from .memory import brand_of
+    found = {p: sum(1 for r in result.items if r.candidates.get(p)) for p in result.platforms}
+    groups = {k: [] for k in SHOP_KINDS}
+    for p in result.platforms:
+        on = "" if p in result.excluded else " checked"
+        groups[shop_kind(p, settings)].append(
+            f"<label class=check><input type=checkbox name=shop value='{escape(p)}'{on}> {escape(label(settings, p))}"
+            f"<span class='muted small'> {found[p]}/{len(result.items)}</span></label>")
+    shops = "".join(f"<fieldset><legend>{k}</legend>{''.join(v)}</fieldset>" for k, v in groups.items() if v)
+    counts: dict[str, int] = {}
+    for r in result.items:
+        for offers in r.candidates.values():
+            for o in offers:
+                b = brand_of(o.name)
+                if b:
+                    counts[b] = counts.get(b, 0) + 1
+    top = sorted(counts, key=lambda b: -counts[b])[:16]
+    brands = "".join(f"<label class=check><input type=checkbox name=brand value='{escape(b)}'"
+                     f"{' checked' if b in result.brands else ''}> {escape(b.title())}</label>" for b in sorted(top))
+    active = bool(result.excluded or result.brands or result.exact_only)
+    state = (f"{len(result.shops)} of {len(result.platforms)} shops"
+             + (f", {len(result.brands)} brand{'s' if len(result.brands) != 1 else ''}" if result.brands else "")
+             + (", exact only" if result.exact_only else ""))
+    return (f"<details class='panel filters'{' open' if active else ''}><summary><b>Filters</b> <span class='muted small'>{escape(state)}</span></summary>"
+            f"<form method=post action='{escape(base)}/filter{q}'><input type=hidden name=apply value=1>"
+            f"<div class=fgrid>{shops}</div>"
+            + (f"<fieldset class=brands><legend>Brands <span class='muted small'>(none ticked: any brand)</span></legend>{brands}</fieldset>" if brands else "")
+            + f"<label class=check><input type=checkbox name=exact value=1{' checked' if result.exact_only else ''}> Exact matches only</label>"
+            f"<div class=actions><button>Apply filters</button>"
+            f"<button class=quiet name=reset value=1>Show all shops and brands</button></div></form></details>")
 
 
 def _cards_html(result: CompareResult, settings: Settings, i: int, base: str | None, q: str) -> str:
@@ -573,7 +656,7 @@ def _line_html(result: CompareResult, settings: Settings, i: int, base: str | No
         labels.append(f"<li class='label {cls}'>{pic}<div class=shop>{escape(label(settings, p))}</div>"
                       f"<div class=amount>{o.price:,.2f}</div><div class='muted small'>{_unit(o)}</div>{_link(o, 'product')}"
                       f"<div class='flag {'close' if not m.exact else ''}'>{escape(flags)}</div>{no}</li>")
-    missing = [label(settings, p) for p in result.platforms if not r.matches.get(p)]
+    missing = [label(settings, p) for p in result.shops if not r.matches.get(p)]
     state = ""
     plan = result.best.assignments.get(i) if result.best else None
     if r.pinned:
@@ -674,7 +757,11 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
                      f"{learned['lines']} chosen product{'s' if learned['lines'] != 1 else ''}, "
                      f"{learned['rejects']} rejected listing{'s' if learned['rejects'] != 1 else ''}, "
                      f"{learned['avoid']} avoided word{'s' if learned['avoid'] != 1 else ''}.")
-    notes_html = "<div class='notes muted'>" + "".join(f"<p>{escape(x)}</p>" for x in notes) + "</div>" if notes else ""
+    problems = len(result.errors)
+    notes_html = (f"<details class='notes muted'{' open' if problems and not result.best else ''}><summary>Notes: fees, sources and branches "
+                  f"({len(notes)}{f', {problems} shop problem' + ('s' if problems != 1 else '') if problems else ''})</summary>"
+                  + "".join(f"<p class='{'warn' if any(x.startswith(label(settings, p) + ':') for p in result.errors) else ''}'>{escape(x)}</p>"
+                            for x in notes) + "</details>") if notes else ""
     first_pick = next((i for i, r in enumerate(result.items) if r.needs_pick), None)
     bar = ("<nav class=actionbar>"
            + (f"<a class=go href='#pick-{first_pick}'>Choose products</a>" if first_pick is not None else
@@ -683,8 +770,8 @@ def to_html(result: CompareResult, settings: Settings, adapters: dict[str, Adapt
     undo_html = (f"<div class=notice><form method=post action='{escape(base)}/undo{q}' class=inline><b>Line removed.</b> "
                  f"<button class=link>Undo</button></form></div>" if undo and base else "")
     refresh = "<!--refresh-->" if base else ""  # filled when the page is served, once prices are old
-    body = (f"{_orders_html(result, settings, options, base, q)}<div class='panel plan'>{plan}</div>{undo_html}{refresh}{notice}"
-            f"{_one_shop_html(result, settings)}{tips_html}"
+    body = (f"{_orders_html(result, settings, options, base, q)}{_filters_html(result, settings, base, q)}<div class='panel plan'>{plan}</div>{undo_html}{refresh}{notice}"
+            f"{_one_shop_html(result, settings, base, q)}{tips_html}"
             f"<h2>{'Choose your products and compare' if pending else 'Every price, item by item'}</h2>{lines}{notes_html}{bar}")
     script = (ROW_SCRIPT + "<script>document.querySelectorAll('button.copy').forEach(b=>b.addEventListener('click',async()=>{"
               "try{await navigator.clipboard.writeText(b.dataset.text);b.textContent='Copied. Opening the shop…'}"
